@@ -439,6 +439,10 @@ docker run --rm \
 
 ### AI Skill Hooks
 
+> [!WARNING]  
+> This functionlity is planned to be deprecated in the future. If you're using
+> it, you can keep doing so, but note that we will introduce a new way of working with skills.
+
 Automatically sync skills from your Port organization into local AI coding tools (Cursor, Claude Code, Gemini CLI, OpenAI Codex, Windsurf, GitHub Copilot).
 Synced and uploaded skills follow the [Agent Skills specification](https://agentskills.io/specification): a skill directory with `SKILL.md` at the root, plus optional `scripts/`, `references/`, and `assets/`.
 The default skills model supports sync/list/search. Upload and publish commands require the labs versioned skills data model; contact Port to enable it.
