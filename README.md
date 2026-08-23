@@ -4,7 +4,7 @@
 
 <br />
 
-A modular command-line interface for Port that enables authentican, API operations, data import/export, organization migration — using a pluggable module architecture.
+A modular command-line interface for Port that enables authentication, API operations, data import/export, organization migration — using a pluggable module architecture.
 
 ## Features
 
@@ -444,7 +444,7 @@ docker run --rm \
 ### AI Skill Hooks
 
 > [!WARNING]  
-> This functionlity is planned to be deprecated in the future. If you're using
+> This functionality is planned to be deprecated in the future. If you're using
 > it, you can keep doing so, but note that we will introduce a new way of working with skills.
 
 Automatically sync skills from your Port organization into local AI coding tools (Cursor, Claude Code, Gemini CLI, OpenAI Codex, Windsurf, GitHub Copilot).
