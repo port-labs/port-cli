@@ -4,10 +4,10 @@ This document outlines the process for creating a new release of Port CLI.
 
 ## Pre-Release Checklist
 
-- [ ] All tests pass (`make -f Makefile.go test`)
-- [ ] Code is formatted (`make -f Makefile.go format`)
-- [ ] Linter passes (`make -f Makefile.go lint`)
-- [ ] Binary builds successfully (`make -f Makefile.go build-release`)
+- [ ] All tests pass (`make -f Makefile test`)
+- [ ] Code is formatted (`make -f Makefile format`)
+- [ ] Linter passes (`make -f Makefile lint`)
+- [ ] Binary builds successfully (`make -f Makefile build-release`)
 - [ ] Binary is tested (`scripts/test-binary.sh bin/port`)
 - [ ] CHANGELOG.md is updated with release notes
 - [ ] Version number is updated in relevant files
@@ -23,10 +23,10 @@ git checkout main
 git pull origin main
 
 # Run all quality checks
-make -f Makefile.go quality
+make -f Makefile quality
 
 # Build release binary locally to test
-make -f Makefile.go build-release
+make -f Makefile build-release
 scripts/test-binary.sh bin/port
 ```
 
@@ -100,6 +100,7 @@ Follow [Semantic Versioning](https://semver.org/):
 - **PATCH**: Bug fixes (backward compatible)
 
 Examples:
+
 - `v1.0.0` - Initial release
 - `v1.1.0` - New features added
 - `v1.1.1` - Bug fixes
@@ -225,6 +226,7 @@ Follow [Semantic Versioning](https://semver.org/):
 - **PATCH**: Bug fixes (backward compatible, e.g., bug fixes, performance improvements)
 
 Examples:
+
 - `v1.0.0` - Initial release
 - `v1.1.0` - New features added (e.g., dual credentials support)
 - `v1.1.1` - Bug fixes
@@ -298,21 +300,25 @@ When updating CHANGELOG.md, use this format:
 ## [X.X.X] - YYYY-MM-DD
 
 ### Added
+
 - New feature 1
 - New feature 2
 - Support for dual organization credentials
 - Diff validation for import/migrate commands
 
 ### Changed
+
 - Improved performance (X% faster)
 - Updated dependencies
 - Enhanced error messages
 
 ### Fixed
+
 - Bug fix 1
 - Bug fix 2
 
 ### Breaking Changes
+
 - Breaking change description (if any)
   - Migration guide/instructions
 ```
@@ -345,18 +351,21 @@ When updating CHANGELOG.md, use this format:
 ## [X.X.X] - YYYY-MM-DD
 
 ### Added
+
 - New feature 1
 - New feature 2
 
 ### Changed
+
 - Improved performance
 - Updated dependencies
 
 ### Fixed
+
 - Bug fix 1
 - Bug fix 2
 
 ### Breaking Changes
+
 - Breaking change description
 ```
-
