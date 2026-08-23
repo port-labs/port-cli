@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/port-experimental/port-cli/internal/useragent"
+	"github.com/port-labs/port-cli/internal/useragent"
 )
 
 // TestChecker_UserAgent verifies that the GitHub release check sends a

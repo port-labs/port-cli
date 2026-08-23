@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/port-experimental/port-cli/internal/api"
-	"github.com/port-experimental/port-cli/internal/auth"
-	"github.com/port-experimental/port-cli/internal/config"
+	"github.com/port-labs/port-cli/internal/api"
+	"github.com/port-labs/port-cli/internal/auth"
+	"github.com/port-labs/port-cli/internal/config"
 )
 
 // Module orchestrates hook installation and skill syncing for Port AI skills.

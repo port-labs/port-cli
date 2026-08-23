@@ -54,6 +54,6 @@ changelog:
 
 release:
   github:
-    owner: port-experimental
+    owner: port-labs
     name: port-cli
   draft: false

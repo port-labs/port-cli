@@ -64,10 +64,10 @@ Test installation on different platforms:
 
 ```bash
 # macOS
-curl -fsSL https://raw.githubusercontent.com/port-experimental/port-cli/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/port-labs/port-cli/main/scripts/install.sh | bash
 
 # Linux
-curl -fsSL https://raw.githubusercontent.com/port-experimental/port-cli/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/port-labs/port-cli/main/scripts/install.sh | bash
 ```
 
 ### 6. Post-Release
@@ -188,10 +188,10 @@ Test installation on different platforms:
 
 ```bash
 # macOS
-curl -fsSL https://raw.githubusercontent.com/port-experimental/port-cli/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/port-labs/port-cli/main/scripts/install.sh | bash
 
 # Linux
-curl -fsSL https://raw.githubusercontent.com/port-experimental/port-cli/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/port-labs/port-cli/main/scripts/install.sh | bash
 ```
 
 ### 6. Post-Release

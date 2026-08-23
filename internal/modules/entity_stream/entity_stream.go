@@ -8,7 +8,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/port-experimental/port-cli/internal/api"
+	"github.com/port-labs/port-cli/internal/api"
 )
 
 const defaultJSONLBatchSize = 100

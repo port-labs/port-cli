@@ -3,7 +3,7 @@ package commands
 import (
 	"testing"
 
-	exportmodule "github.com/port-experimental/port-cli/internal/modules/export"
+	exportmodule "github.com/port-labs/port-cli/internal/modules/export"
 	"github.com/spf13/cobra"
 )
 

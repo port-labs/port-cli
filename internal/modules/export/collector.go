@@ -6,8 +6,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/port-experimental/port-cli/internal/api"
-	systemblueprints "github.com/port-experimental/port-cli/internal/modules/system_blueprints"
+	"github.com/port-labs/port-cli/internal/api"
+	systemblueprints "github.com/port-labs/port-cli/internal/modules/system_blueprints"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 )

@@ -3,8 +3,8 @@ package migrate
 import (
 	"sort"
 
-	"github.com/port-experimental/port-cli/internal/api"
-	"github.com/port-experimental/port-cli/internal/modules/import_module"
+	"github.com/port-labs/port-cli/internal/api"
+	"github.com/port-labs/port-cli/internal/modules/import_module"
 )
 
 func blueprintIdentifiers(blueprints []api.Blueprint) []string {

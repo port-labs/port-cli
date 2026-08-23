@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/port-experimental/port-cli/internal/api"
-	entitystream "github.com/port-experimental/port-cli/internal/modules/entity_stream"
+	"github.com/port-labs/port-cli/internal/api"
+	entitystream "github.com/port-labs/port-cli/internal/modules/entity_stream"
 )
 
 func TestPartitionEntities_FiltersByBlueprintOptions(t *testing.T) {

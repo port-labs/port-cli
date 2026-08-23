@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
-	"github.com/port-experimental/port-cli/internal/config"
+	"github.com/port-labs/port-cli/internal/config"
 )
 
 // ErrorOutput is the structured JSON representation of a command error.

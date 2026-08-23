@@ -1,62 +1,54 @@
 # Port CLI
 
-A modular command-line interface for Port that enables data import/export, organization migration, and API operations using a pluggable module architecture.
+A modular command-line interface for Port that enables authentican, API operations, data import/export, organization migration — using a pluggable module architecture.
 
 ## Features
 
-- 📤 **Export**: Backup Port data (blueprints, entities, scorecards, actions, teams, automations, pages, integrations)
-- 📥 **Import**: Restore data from backups
-- 🔄 **Migrate**: Transfer data between Port organizations
-- 🔍 **Compare**: Diff two Port organizations and generate reports (text, JSON, HTML)
-- 🗑️ **Clear**: Bulk-delete org resources (blueprints, entities, actions, scorecards, automations, pages)
-- 🔌 **API Operations**: Direct CRUD operations on Port resources
-- 🤖 **Skills**: Sync AI skills from Port into your local AI coding tools (Cursor, Claude Code, Gemini CLI, OpenAI Codex, Windsurf, GitHub Copilot)
+- **Authenticate**: log in to multiple organizations simultaneously
+- **API Operations**: Direct CRUD operations on Port resources
+- **Import**: Restore data from backups
+- **Export**: Backup Port data (blueprints, entities, scorecards, actions, teams, automations, pages, integrations)
+- **Migrate**: Transfer data between Port organizations
+- **Compare**: Diff two Port organizations and generate reports (text, JSON, HTML)
+- **Clear**: Bulk-delete org resources (blueprints, entities, actions, scorecards, automations, pages)
+- **Skills**: Sync AI skills from Port into your local AI coding tools (Cursor, Claude Code, Gemini CLI, OpenAI Codex, Windsurf, GitHub Copilot)
 
 ## Installation
 
-### Through npm
+Use `npm`:
 
-**Global installation:**
 ```bash
-npm install -g @port-experimental/port-cli
+npm install -g @port-labs/port-cli
 ```
 
-**Use with npx (no installation needed):**
-```bash
-npx @port-experimental/port-cli --version
-```
-
-**Local installation in your project:**
-```bash
-npm install @port-experimental/port-cli
-```
-
-### Quick Install Script
+<details>
+<summary><strong>Quick Install Script</strong></summary>
 
 **Linux/macOS:**
+
 ```bash
-curl -fsSL https://raw.githubusercontent.com/port-experimental/port-cli/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/port-labs/port-cli/main/scripts/install.sh | bash
 ```
 
 This will download and install the latest release binary to `/usr/local/bin` (or `~/.local/bin` if you don't have write permissions).
+</details>
 
-**Verify installation:**
-```bash
-port --version
-```
+<details>
+<summary><strong>Binary Releases</strong></summary>
+Download pre-built binaries for your platform from [GitHub Releases](https://github.com/port-labs/port-cli/releases).
+</details>
 
-### Binary Releases
-
-Download pre-built binaries for your platform from [GitHub Releases](https://github.com/port-experimental/port-cli/releases).
-
-### Docker
+<details>
+<summary><strong>Docker</strong></summary>
 
 **Build the image:**
+
 ```bash
 docker build -t port-cli .
 ```
 
 **Run a command:**
+
 ```bash
 docker run --rm \
   -e PORT_CLIENT_ID="your-client-id" \
@@ -65,6 +57,7 @@ docker run --rm \
 ```
 
 **Export with output written to the host:**
+
 ```bash
 docker run --rm \
   -e PORT_CLIENT_ID="your-client-id" \
@@ -73,12 +66,15 @@ docker run --rm \
   port-cli export --output /data/backup.tar.gz
 ```
 
-### Build from Source
+</details>
+
+<details>
+<summary><strong>Build from Source</strong></summary>
 
 For development or if you need the latest unreleased code:
 
 ```bash
-git clone https://github.com/port-experimental/port-cli.git
+git clone https://github.com/port-labs/port-cli.git
 cd port-cli
 make build
 ./bin/port --help
@@ -87,11 +83,26 @@ make build
 **Note:** When building from source, use `./bin/port` instead of `port` in commands. For installed binaries, use `port` directly.
 
 See [INSTALL.md](INSTALL.md) for detailed installation instructions.
+</details>
 
+**Verify installation:**
+
+```bash
+port --version
+```
 
 ## Quick Start
 
-### 1. Configure Credentials
+### 1. Authenticate
+
+Run `port auth login` which will open a browser for you to log into Port.
+This will generate a short-lived token and allow you to perform actions on behalf of your user.
+
+#### Use Persistent Credentials (Optional)
+
+You can also authenticate with a client ID + secret combo.
+These do not expire so they are less secure than a token.
+See [Port Secrets docs](https://docs.port.io/platform-administration/secrets-management/port-secrets) for more details.
 
 Run `port config --init` to create a configuration file at `~/.port/config.yaml`:
 
@@ -116,6 +127,12 @@ export PORT_API_URL="https://api.getport.io/v1"
 ### 2. Run Commands
 
 ```bash
+# Get blueprints
+port api call /blueprints
+
+# Get action runs for org
+port api call /actions/runs --org my-org
+
 # Export data
 port export --output backup.tar.gz
 
@@ -142,50 +159,17 @@ port skills init
 
 ## Commands
 
+- `port auth` - Authenticate to different organizations
+- `port api` - Direct API operations (blueprints, entities)
 - `port export` - Export data from Port
 - `port import` - Import data to Port
 - `port compare` - Compare two Port organizations
 - `port migrate` - Migrate data between organizations
 - `port clear` - Delete org resources in bulk (blueprints, entities, actions, etc.)
-- `port api` - Direct API operations (blueprints, entities)
 - `port skills` - Manage Port AI skill hooks and local skill sync
 - `port cache` - Manage locally cached Port CLI data (e.g. `port cache clear` — local only, not org resources)
 - `port config` - Manage configuration
 - `port version` - Show version
-
-## Development
-
-### Go CLI Development
-
-```bash
-# Build
-make build
-
-# Run tests
-make test
-
-# Format code
-make format
-
-# Lint
-make lint
-```
-
-
-## Project Structure
-
-```
-port-cli/
-├── cmd/port/              # Go CLI entry point
-├── internal/              # Go implementation
-│   ├── api/              # API client
-│   ├── config/           # Configuration management
-│   ├── commands/         # CLI commands
-│   ├── modules/          # Business logic modules
-│   └── output/           # Output formatters
-├── go.mod                # Go dependencies
-└── Makefile              # Go build
-```
 
 ## Configuration
 
@@ -201,7 +185,7 @@ organizations:
     client_id: your-client-id
     client_secret: your-client-secret
     api_url: https://api.getport.io/v1
-    
+
   staging:
     client_id: staging-client-id
     client_secret: staging-client-secret
@@ -212,7 +196,7 @@ organizations:
 
 ```bash
 PORT_CLIENT_ID          # Port API client ID
-PORT_CLIENT_SECRET      # Port API client secret  
+PORT_CLIENT_SECRET      # Port API client secret
 PORT_API_URL            # Port API URL (optional, default https://api.getport.io/v1)
 PORT_CONFIG_FILE        # Path to config file
 PORT_DEFAULT_ORG        # Default organization name
@@ -346,11 +330,11 @@ Valid `--include` values: `blueprints`, `actions`, `scorecards`, `pages`, `integ
 
 **Do not confuse with other "clear" commands:**
 
-| Command | Scope |
-|---------|-------|
-| `port clear` | Port org resources (API deletes) |
-| `port cache clear` | Local CLI hooks, skills, and config |
-| `port skills clear` | Local synced skill files only |
+| Command             | Scope                               |
+| ------------------- | ----------------------------------- |
+| `port clear`        | Port org resources (API deletes)    |
+| `port cache clear`  | Local CLI hooks, skills, and config |
+| `port skills clear` | Local synced skill files only       |
 
 At least one resource-type flag is required: `--entities`, `--actions`, `--scorecards`, `--automations`, `--pages`, or `--blueprints`. When multiple types are selected, dependents are deleted before parents: entities → actions → scorecards → automations → pages → blueprints.
 
@@ -457,7 +441,7 @@ docker run --rm \
 
 Automatically sync skills from your Port organization into local AI coding tools (Cursor, Claude Code, Gemini CLI, OpenAI Codex, Windsurf, GitHub Copilot).
 Synced and uploaded skills follow the [Agent Skills specification](https://agentskills.io/specification): a skill directory with `SKILL.md` at the root, plus optional `scripts/`, `references/`, and `assets/`.
-The default skills model supports sync/list/search. Upload and publish commands require the experimental versioned skills data model; contact Port to enable it.
+The default skills model supports sync/list/search. Upload and publish commands require the labs versioned skills data model; contact Port to enable it.
 
 ```bash
 # One-time setup: choose tools and skill selection (saved to ~/.port/config.yaml)
@@ -487,7 +471,7 @@ port skills clear
 port cache clear
 ```
 
-See [docs/skills-setup.md](docs/skills-setup.md) for full setup instructions, including the [main skills data model](docs/skills-main-data-model.md) and [experimental versioned skills data model](docs/skills-versioned-data-model.md).
+See [docs/skills-setup.md](docs/skills-setup.md) for full setup instructions, including the [main skills data model](docs/skills-main-data-model.md) and [labs versioned skills data model](docs/skills-versioned-data-model.md).
 
 ## Contributing
 
@@ -505,3 +489,11 @@ MIT License - see [LICENSE](LICENSE)
 
 - [Port Documentation](https://docs.getport.io)
 - [Port API Reference](https://docs.getport.io/api-reference/port-api)
+
+---
+
+<picture>
+  <source media="(prefers-color-scheme: dark)"
+  srcset="./docs/port_logo_black.svg">
+  <img width="300" src="./docs/port_logo_white.svg">
+</picture>

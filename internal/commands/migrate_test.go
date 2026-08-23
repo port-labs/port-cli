@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/port-experimental/port-cli/internal/modules/migrate"
+	"github.com/port-labs/port-cli/internal/modules/migrate"
 	"github.com/spf13/cobra"
 )
 

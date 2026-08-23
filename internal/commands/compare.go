@@ -6,8 +6,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/port-experimental/port-cli/internal/config"
-	"github.com/port-experimental/port-cli/internal/modules/compare"
+	"github.com/port-labs/port-cli/internal/config"
+	"github.com/port-labs/port-cli/internal/modules/compare"
 	"github.com/spf13/cobra"
 )
 

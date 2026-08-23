@@ -6,9 +6,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/port-experimental/port-cli/internal/api"
-	"github.com/port-experimental/port-cli/internal/modules/skills"
-	"github.com/port-experimental/port-cli/internal/styles"
+	"github.com/port-labs/port-cli/internal/api"
+	"github.com/port-labs/port-cli/internal/modules/skills"
+	"github.com/port-labs/port-cli/internal/styles"
 )
 
 func printLoadResult(result *skills.LoadSkillsResult) {

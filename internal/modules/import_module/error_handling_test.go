@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/port-experimental/port-cli/internal/api"
+	"github.com/port-labs/port-cli/internal/api"
 )
 
 func TestBlueprintUpdaterForbiddenFormatChangeIgnoreProperty(t *testing.T) {

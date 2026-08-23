@@ -6,9 +6,9 @@ import (
 	"sync"
 
 	"charm.land/huh/v2"
-	"github.com/port-experimental/port-cli/internal/api"
-	"github.com/port-experimental/port-cli/internal/modules/import_module"
-	"github.com/port-experimental/port-cli/internal/styles"
+	"github.com/port-labs/port-cli/internal/api"
+	"github.com/port-labs/port-cli/internal/modules/import_module"
+	"github.com/port-labs/port-cli/internal/styles"
 	"github.com/spf13/cobra"
 )
 

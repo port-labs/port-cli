@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/port-experimental/port-cli/internal/config"
+	"github.com/port-labs/port-cli/internal/config"
 )
 
 func applySelectionToConfig(cfg *config.SkillsConfig, opts LoadSkillsOptions) {

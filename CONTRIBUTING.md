@@ -14,7 +14,7 @@ Thank you for your interest in contributing to Port CLI! This document provides 
 1. **Clone the repository**
 
 ```bash
-git clone https://github.com/port-experimental/port-cli.git
+git clone https://github.com/port-labs/port-cli.git
 cd port-cli
 ```
 

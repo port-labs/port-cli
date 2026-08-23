@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/port-experimental/port-cli/internal/config"
-	"github.com/port-experimental/port-cli/internal/output"
+	"github.com/port-labs/port-cli/internal/config"
+	"github.com/port-labs/port-cli/internal/output"
 	"github.com/spf13/cobra"
 )
 

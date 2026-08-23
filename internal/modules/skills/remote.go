@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/port-experimental/port-cli/internal/api"
+	"github.com/port-labs/port-cli/internal/api"
 )
 
 // SearchSkills finds skills by identifier or title (GET /skills/search).

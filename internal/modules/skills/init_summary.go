@@ -3,7 +3,7 @@ package skills
 import (
 	"sort"
 
-	"github.com/port-experimental/port-cli/internal/api"
+	"github.com/port-labs/port-cli/internal/api"
 )
 
 // InitSkillSummary is one published skill row for the interactive init catalog overview.

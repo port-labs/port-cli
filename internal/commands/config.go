@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/port-experimental/port-cli/internal/config"
+	"github.com/port-labs/port-cli/internal/config"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )

@@ -1,18 +1,18 @@
 # Port CLI (npm package)
 
-This is the npm package distribution of Port CLI. For the full documentation, see the [main repository](https://github.com/port-experimental/port-cli).
+This is the npm package distribution of Port CLI. For the full documentation, see the [main repository](https://github.com/port-labs/port-cli).
 
 ## Installation
 
 ```bash
 # Global installation
-npm install -g @port-experimental/port-cli
+npm install -g @port-labs/port-cli
 
 # Or use with npx (no installation needed)
-npx @port-experimental/port-cli --version
+npx @port-labs/port-cli --version
 
 # Or install locally in your project
-npm install @port-experimental/port-cli
+npm install @port-labs/port-cli
 ```
 
 ## Usage

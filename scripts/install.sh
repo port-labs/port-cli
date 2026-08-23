@@ -4,7 +4,7 @@
 set -e
 
 VERSION="${VERSION:-latest}"
-REPO="port-experimental/port-cli"
+REPO="port-labs/port-cli"
 GH_API="https://api.github.com/repos/${REPO}"
 
 get_latest_version() {

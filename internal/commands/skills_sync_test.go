@@ -6,7 +6,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/port-experimental/port-cli/internal/modules/skills"
+	"github.com/port-labs/port-cli/internal/modules/skills"
 	"github.com/spf13/cobra"
 )
 

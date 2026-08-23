@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/port-experimental/port-cli/internal/auth"
+	"github.com/port-labs/port-cli/internal/auth"
 )
 
 func testClientWithHandler(t *testing.T, handler http.HandlerFunc) *Client {

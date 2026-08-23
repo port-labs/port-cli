@@ -10,11 +10,11 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/port-experimental/port-cli/internal/api"
-	"github.com/port-experimental/port-cli/internal/auth"
-	"github.com/port-experimental/port-cli/internal/config"
-	"github.com/port-experimental/port-cli/internal/modules/export"
-	systemblueprints "github.com/port-experimental/port-cli/internal/modules/system_blueprints"
+	"github.com/port-labs/port-cli/internal/api"
+	"github.com/port-labs/port-cli/internal/auth"
+	"github.com/port-labs/port-cli/internal/config"
+	"github.com/port-labs/port-cli/internal/modules/export"
+	systemblueprints "github.com/port-labs/port-cli/internal/modules/system_blueprints"
 )
 
 // Module handles importing data to Port.
