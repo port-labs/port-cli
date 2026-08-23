@@ -1,5 +1,9 @@
 # Port CLI
 
+<img src="./docs/hero.png" width="600" />
+
+<br />
+
 A modular command-line interface for Port that enables authentican, API operations, data import/export, organization migration — using a pluggable module architecture.
 
 ## Features
