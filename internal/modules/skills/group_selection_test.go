@@ -3,8 +3,8 @@ package skills
 import (
 	"testing"
 
-	"github.com/port-experimental/port-cli/internal/api"
-	"github.com/port-experimental/port-cli/internal/config"
+	"github.com/port-labs/port-cli/internal/api"
+	"github.com/port-labs/port-cli/internal/config"
 )
 
 func TestGroupSelectionFromCatalog(t *testing.T) {

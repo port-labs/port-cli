@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/port-experimental/port-cli/internal/config"
+	"github.com/port-labs/port-cli/internal/config"
 )
 
 func TestSaveAndLoadSkillsConfig(t *testing.T) {

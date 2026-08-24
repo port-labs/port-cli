@@ -5,8 +5,8 @@ import (
 	"reflect"
 	"sort"
 
-	"github.com/port-experimental/port-cli/internal/api"
-	"github.com/port-experimental/port-cli/internal/modules/export"
+	"github.com/port-labs/port-cli/internal/api"
+	"github.com/port-labs/port-cli/internal/modules/export"
 )
 
 // ExcludedFields contains fields to exclude from comparison.

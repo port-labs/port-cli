@@ -1,6 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/jetify-com/devbox/0.17.0/.schema/devbox.schema.json",
   "packages": [
+    "git@latest",
     "go@1.21",
     "golangci-lint@latest",
     "go-task@latest",
@@ -10,6 +11,6 @@
   ],
   "shell": {
     "init_hook": ["echo \"Creating devbox shell...\""],
-    "scripts":   {}
+    "scripts": {}
   }
 }

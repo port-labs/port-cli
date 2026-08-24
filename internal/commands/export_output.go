@@ -1,6 +1,6 @@
 package commands
 
-import exportmodule "github.com/port-experimental/port-cli/internal/modules/export"
+import exportmodule "github.com/port-labs/port-cli/internal/modules/export"
 
 type exportJSONSummaryOptions struct {
 	SkipEntities             bool

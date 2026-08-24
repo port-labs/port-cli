@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/port-experimental/port-cli/internal/auth"
+	"github.com/port-labs/port-cli/internal/auth"
 	"github.com/spf13/cobra"
 )
 

@@ -11,9 +11,9 @@ import (
 
 	"charm.land/fang/v2"
 	"charm.land/lipgloss/v2"
-	"github.com/port-experimental/port-cli/internal/commands"
-	"github.com/port-experimental/port-cli/internal/output"
-	"github.com/port-experimental/port-cli/internal/styles"
+	"github.com/port-labs/port-cli/internal/commands"
+	"github.com/port-labs/port-cli/internal/output"
+	"github.com/port-labs/port-cli/internal/styles"
 	"github.com/spf13/cobra"
 )
 

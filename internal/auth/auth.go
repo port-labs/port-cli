@@ -20,7 +20,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/cli/browser"
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/port-experimental/port-cli/internal/styles"
+	"github.com/port-labs/port-cli/internal/styles"
 	"golang.org/x/oauth2"
 )
 

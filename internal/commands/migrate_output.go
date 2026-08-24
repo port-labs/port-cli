@@ -3,8 +3,8 @@ package commands
 import (
 	"strings"
 
-	"github.com/port-experimental/port-cli/internal/modules/migrate"
-	"github.com/port-experimental/port-cli/internal/output"
+	"github.com/port-labs/port-cli/internal/modules/migrate"
+	"github.com/port-labs/port-cli/internal/output"
 )
 
 func addMigrationDetailJSON(data map[string]interface{}, result *migrate.Result) {

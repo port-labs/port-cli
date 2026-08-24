@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/port-experimental/port-cli/internal/api"
+	"github.com/port-labs/port-cli/internal/api"
 )
 
 var managedFields = map[string]map[string]map[string]bool{

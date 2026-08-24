@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/port-experimental/port-cli/internal/api"
-	"github.com/port-experimental/port-cli/internal/modules/export"
+	"github.com/port-labs/port-cli/internal/api"
+	"github.com/port-labs/port-cli/internal/modules/export"
 )
 
 // mockClient is a minimal stub to satisfy DiffComparer's need for *api.Client.

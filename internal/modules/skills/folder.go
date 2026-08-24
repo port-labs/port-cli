@@ -7,7 +7,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/port-experimental/port-cli/internal/api"
+	"github.com/port-labs/port-cli/internal/api"
 )
 
 // SkillFolderPack is the parsed content of a local skill directory.

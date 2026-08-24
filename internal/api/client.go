@@ -10,8 +10,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/port-experimental/port-cli/internal/auth"
-	"github.com/port-experimental/port-cli/internal/useragent"
+	"github.com/port-labs/port-cli/internal/auth"
+	"github.com/port-labs/port-cli/internal/useragent"
 )
 
 const (

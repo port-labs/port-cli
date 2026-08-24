@@ -3,7 +3,7 @@ package commands
 import (
 	"testing"
 
-	"github.com/port-experimental/port-cli/internal/modules/skills"
+	"github.com/port-labs/port-cli/internal/modules/skills"
 )
 
 func TestFilterIDsToUngrouped(t *testing.T) {

@@ -3,8 +3,8 @@ package skills
 import (
 	"sort"
 
-	"github.com/port-experimental/port-cli/internal/api"
-	"github.com/port-experimental/port-cli/internal/config"
+	"github.com/port-labs/port-cli/internal/api"
+	"github.com/port-labs/port-cli/internal/config"
 )
 
 // GroupSelectionFromCatalog computes include/exclude deltas vs team-owned groups.

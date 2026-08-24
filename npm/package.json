@@ -1,5 +1,5 @@
 {
-  "name": "@port-experimental/port-cli",
+  "name": "@port-labs/port-cli",
   "version": "0.1.3",
   "description": "A modular command-line interface for Port that enables data import/export, organization migration, and API operations",
   "main": "src/index.js",
@@ -22,12 +22,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/port-experimental/port-cli.git"
+    "url": "git+https://github.com/port-labs/port-cli.git"
   },
   "bugs": {
-    "url": "https://github.com/port-experimental/port-cli/issues"
+    "url": "https://github.com/port-labs/port-cli/issues"
   },
-  "homepage": "https://github.com/port-experimental/port-cli#readme",
+  "homepage": "https://github.com/port-labs/port-cli#readme",
   "files": [
     "src/",
     "install.js",

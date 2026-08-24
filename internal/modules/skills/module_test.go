@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/port-experimental/port-cli/internal/config"
+	"github.com/port-labs/port-cli/internal/config"
 )
 
 func TestModule_Init_InstallsHooksAndSavesConfig(t *testing.T) {

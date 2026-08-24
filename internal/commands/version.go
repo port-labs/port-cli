@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"runtime"
 
-	"github.com/port-experimental/port-cli/internal/output"
-	"github.com/port-experimental/port-cli/internal/update"
-	"github.com/port-experimental/port-cli/internal/useragent"
+	"github.com/port-labs/port-cli/internal/output"
+	"github.com/port-labs/port-cli/internal/update"
+	"github.com/port-labs/port-cli/internal/useragent"
 	"github.com/spf13/cobra"
 )
 

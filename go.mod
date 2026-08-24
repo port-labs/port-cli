@@ -1,4 +1,4 @@
-module github.com/port-experimental/port-cli
+module github.com/port-labs/port-cli
 
 go 1.25.9
 

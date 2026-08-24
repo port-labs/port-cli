@@ -8,7 +8,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/port-experimental/port-cli/internal/config"
+	"github.com/port-labs/port-cli/internal/config"
 )
 
 // Module handles organization comparison operations.
