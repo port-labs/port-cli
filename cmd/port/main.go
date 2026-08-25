@@ -24,7 +24,7 @@ var (
 )
 
 func init() {
-	fmt.Print("test")
+	fmt.Print("test 2")
 	// Try to get build info from runtime
 	if info, ok := debug.ReadBuildInfo(); ok {
 		if version == "dev" {
