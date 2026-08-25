@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/port-experimental/port-cli/internal/api"
-	"github.com/port-experimental/port-cli/internal/config"
-	"github.com/port-experimental/port-cli/internal/modules/export"
-	"github.com/port-experimental/port-cli/internal/modules/import_module"
+	"github.com/port-labs/port-cli/internal/api"
+	"github.com/port-labs/port-cli/internal/config"
+	"github.com/port-labs/port-cli/internal/modules/export"
+	"github.com/port-labs/port-cli/internal/modules/import_module"
 )
 
 // detectInputType determines if input is an org name or file path.
@@ -120,8 +120,9 @@ func (f *Fetcher) fetchFromOrg(ctx context.Context, opts FetchOptions) (*OrgData
 		}
 	}
 	data, err := collector.Collect(ctx, export.Options{
-		SkipEntities:     !includesEntities,
-		IncludeResources: opts.IncludeResources,
+		SkipEntities:       !includesEntities,
+		IncludeRuleResults: true,
+		IncludeResources:   opts.IncludeResources,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to collect data from org %s: %w", opts.OrgName, err)

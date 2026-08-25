@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/port-experimental/port-cli/internal/auth"
+	"github.com/port-labs/port-cli/internal/auth"
 )
 
 // ErrOrgNotFound is returned by GetToken when credentials exist on disk but no

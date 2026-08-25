@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/port-experimental/port-cli/internal/config"
+	"github.com/port-labs/port-cli/internal/config"
 )
 
 // ---------------------------------------------------------------------------
@@ -22,7 +22,7 @@ func newTestModule(t *testing.T) (*Module, *config.ConfigManager, string) {
 		ClientSecret: "test-secret",
 		APIURL:       "https://api.getport.io/v1",
 	}
-	return NewModule(nil, orgCfg, cm), cm, dir
+	return NewModule(nil, orgCfg, cm, ""), cm, dir
 }
 
 func writeCfg(t *testing.T, cm *config.ConfigManager, cfg *config.SkillsConfig) {
@@ -52,16 +52,24 @@ func assertFileAbsent(t *testing.T, path string) {
 	}
 }
 
+func assertFileContent(t *testing.T, path, want string) {
+	t.Helper()
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read %s: %v", path, err)
+	}
+	if string(content) != want {
+		t.Errorf("content mismatch for %s: want %q, got %q", path, want, string(content))
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Skill / path helpers
 // ---------------------------------------------------------------------------
 
 // skillMDPath returns the expected SKILL.md path inside a target directory.
 func skillMDPath(targetDir, groupID, skillID string) string {
-	if groupID == "" {
-		groupID = NoGroupDir
-	}
-	return filepath.Join(targetDir, "skills", PortSkillsDir, groupID, skillID, "SKILL.md")
+	return filepath.Join(targetDir, "skills", skillID, "SKILL.md")
 }
 
 func identifiers(skills []Skill) []string {

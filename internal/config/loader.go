@@ -37,8 +37,8 @@ func NewConfigManager(configPath string) *ConfigManager {
 
 // loadEnvFiles loads .env files from current directory and ~/.port/.env.
 func loadEnvFiles() {
-	// Skip .env loading during tests
-	if os.Getenv("TESTING") != "" {
+	// Skip .env loading during tests or when explicitly disabled.
+	if os.Getenv("TESTING") != "" || os.Getenv("PORT_NO_ENV_FILE") != "" {
 		return
 	}
 
@@ -195,46 +195,14 @@ func (cm *ConfigManager) resolveOrgConfig(cfg *Config, clientID, clientSecret, a
 			if exists {
 				overrideConfig.ClientID = existingOrg.ClientID
 			} else {
-				return nil, fmt.Errorf(`missing credentials for %s org
-
-To authenticate, provide credentials using one of these methods:
-
-1. CLI flags (recommended for standalone binaries):
-   port export --client-id YOUR_CLIENT_ID --client-secret YOUR_CLIENT_SECRET
-   port import --target-client-id YOUR_CLIENT_ID --target-client-secret YOUR_CLIENT_SECRET
-
-2. Environment variables:
-   export PORT_CLIENT_ID="your-client-id"
-   export PORT_CLIENT_SECRET="your-client-secret"
-   export PORT_TARGET_CLIENT_ID="your-target-client-id"
-   export PORT_TARGET_CLIENT_SECRET="your-target-client-secret"
-
-3. Configuration file:
-   Run: port config --init
-   Then edit: %s`, orgType, cm.configPath)
+				return nil, fmt.Errorf("%s", MissingCredentialsForOrgMessage(orgType, cm.configPath))
 			}
 		}
 		if overrideConfig.ClientSecret == "" {
 			if exists {
 				overrideConfig.ClientSecret = existingOrg.ClientSecret
 			} else {
-				return nil, fmt.Errorf(`missing credentials for %s org
-
-To authenticate, provide credentials using one of these methods:
-
-1. CLI flags (recommended for standalone binaries):
-   port export --client-id YOUR_CLIENT_ID --client-secret YOUR_CLIENT_SECRET
-   port import --target-client-id YOUR_CLIENT_ID --target-client-secret YOUR_CLIENT_SECRET
-
-2. Environment variables:
-   export PORT_CLIENT_ID="your-client-id"
-   export PORT_CLIENT_SECRET="your-client-secret"
-   export PORT_TARGET_CLIENT_ID="your-target-client-id"
-   export PORT_TARGET_CLIENT_SECRET="your-target-client-secret"
-
-3. Configuration file:
-   Run: port config --init
-   Then edit: %s`, orgType, cm.configPath)
+				return nil, fmt.Errorf("%s", MissingCredentialsForOrgMessage(orgType, cm.configPath))
 			}
 		}
 		if overrideConfig.APIURL == "" {
@@ -449,7 +417,7 @@ func (cm *ConfigManager) Write(cfg *Config) error {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
 
-	if err := os.WriteFile(cm.configPath, data, 0o644); err != nil {
+	if err := os.WriteFile(cm.configPath, data, 0o600); err != nil {
 		return fmt.Errorf("failed to write config file: %w", err)
 	}
 
@@ -462,7 +430,7 @@ func (cm *ConfigManager) WriteBytes(data []byte) error {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
 
-	if err := os.WriteFile(cm.configPath, data, 0o644); err != nil {
+	if err := os.WriteFile(cm.configPath, data, 0o600); err != nil {
 		return fmt.Errorf("failed to write config file: %w", err)
 	}
 
@@ -528,7 +496,7 @@ func (cm *ConfigManager) SaveSkillsConfig(skills *SkillsConfig) error {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
 
-	if err := os.WriteFile(cm.configPath, data, 0o644); err != nil {
+	if err := os.WriteFile(cm.configPath, data, 0o600); err != nil {
 		return fmt.Errorf("failed to write config file: %w", err)
 	}
 

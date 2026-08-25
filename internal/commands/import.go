@@ -2,29 +2,35 @@ package commands
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
-	"github.com/port-experimental/port-cli/internal/config"
-	"github.com/port-experimental/port-cli/internal/modules/import_module"
-	"github.com/port-experimental/port-cli/internal/output"
+	"github.com/port-labs/port-cli/internal/config"
+	"github.com/port-labs/port-cli/internal/modules/import_module"
+	"github.com/port-labs/port-cli/internal/output"
 	"github.com/spf13/cobra"
 )
 
 // RegisterImport registers the import command.
 func RegisterImport(rootCmd *cobra.Command) {
 	var (
-		input                  string
-		org                    string
-		targetOrg              string
-		dryRun                 bool
-		skipEntities           bool
-		skipSystemBlueprints   bool
-		include                string
-		outputFormat           string
-		verbose                bool
-		showPagesPipeline      bool
-		excludeBlueprints      string
-		excludeBlueprintSchema string
+		input                         string
+		org                           string
+		targetOrg                     string
+		dryRun                        bool
+		skipEntities                  bool
+		skipSystemBlueprints          bool
+		skipSystemBlueprintProperties bool
+		includeRuleResults            bool
+		include                       string
+		outputFormat                  string
+		verbose                       bool
+		showPagesPipeline             bool
+		excludeBlueprints             string
+		excludeBlueprintSchema        string
+		usersAsDisabled               bool
+		maxErrors                     int
+		onError                       []string
 	)
 
 	importCmd := &cobra.Command{
@@ -36,6 +42,10 @@ Imports blueprints, entities, scorecards, actions, teams, automations, pages, an
 Use --skip-entities to only import configuration without entity data.
 Use --include to selectively import specific resource types.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := validateStringEnum("--output-format", outputFormat, []string{"text", "json"}); err != nil {
+				return err
+			}
+
 			flags := GetGlobalFlags(cmd.Context())
 			configManager := config.NewConfigManager(flags.ConfigFile)
 
@@ -69,6 +79,13 @@ Use --include to selectively import specific resource types.`,
 			if targetOrgConfig == nil {
 				return fmt.Errorf("target organization configuration not found")
 			}
+			if err := validateMaxErrorsFlag(maxErrors); err != nil {
+				return err
+			}
+			errorHandling, err := buildErrorHandlingOptions(cmd, onError)
+			if err != nil {
+				return err
+			}
 
 			orgConfig := targetOrgConfig
 
@@ -93,12 +110,17 @@ Use --include to selectively import specific resource types.`,
 					"integrations":          true,
 					"blueprint-permissions": true,
 					"action-permissions":    true,
+					"page-permissions":      true,
 				}
 
 				for _, r := range includeList {
 					if !validResources[r] {
-						return fmt.Errorf("invalid resource: %s. Valid resources: blueprints, entities, scorecards, actions, teams, users, automations, pages, integrations, blueprint-permissions, action-permissions", r)
+						return fmt.Errorf("invalid resource: %s. Valid resources: blueprints, entities, scorecards, actions, teams, users, automations, pages, integrations, blueprint-permissions, action-permissions, page-permissions", r)
 					}
+				}
+
+				if slices.Contains(includeList, "page-permissions") && !slices.Contains(includeList, "pages") {
+					return fmt.Errorf("page-permissions requires pages to also be included (add 'pages' to --include)")
 				}
 
 				// Handle conflict between skip_entities and include
@@ -196,17 +218,21 @@ Use --include to selectively import specific resource types.`,
 
 			// Execute import
 			result, err := importModule.Execute(cmd.Context(), import_module.Options{
-				InputPath:              input,
-				DryRun:                 dryRun,
-				SkipEntities:           skipEntities,
-				SkipSystemBlueprints:   skipSystemBlueprints,
-				IncludeResources:       includeList,
-				ExcludeBlueprints:      excludeBlueprintList,
-				ExcludeBlueprintSchema: excludeBlueprintSchemaList,
-				Verbose:                verbose,
-				ShowPagesPipeline:      showPagesPipeline,
-				ProgressCallback:       progressCallback,
-				LogCallback:            logCallback,
+				InputPath:                     input,
+				DryRun:                        dryRun,
+				SkipEntities:                  skipEntities,
+				SkipSystemBlueprints:          skipSystemBlueprints,
+				SkipSystemBlueprintProperties: skipSystemBlueprintProperties,
+				IncludeRuleResults:            includeRuleResults,
+				IncludeResources:              includeList,
+				ExcludeBlueprints:             excludeBlueprintList,
+				ExcludeBlueprintSchema:        excludeBlueprintSchemaList,
+				UsersAsDisabled:               usersAsDisabled,
+				Verbose:                       verbose,
+				ShowPagesPipeline:             showPagesPipeline,
+				ProgressCallback:              progressCallback,
+				LogCallback:                   logCallback,
+				ErrorHandling:                 errorHandling,
 			})
 
 			// Clear progress line
@@ -226,51 +252,59 @@ Use --include to selectively import specific resource types.`,
 				return fmt.Errorf("import failed: %w", err)
 			}
 
-			if !result.Success {
-				if outputFormat == "json" {
-					jsonResult := output.JSONResult{
-						Success: false,
-						Error:   "import failed",
-					}
-					output.PrintJSON(jsonResult)
-					return fmt.Errorf("import failed")
-				}
-				return fmt.Errorf("import failed")
-			}
-
 			// Output in JSON format if requested
 			if outputFormat == "json" {
 				jsonData := map[string]interface{}{
-					"success":              true,
-					"message":              result.Message,
-					"blueprints_created":   result.BlueprintsCreated,
-					"blueprints_updated":   result.BlueprintsUpdated,
-					"entities_created":     result.EntitiesCreated,
-					"entities_updated":     result.EntitiesUpdated,
-					"scorecards_created":   result.ScorecardsCreated,
-					"scorecards_updated":   result.ScorecardsUpdated,
-					"actions_created":      result.ActionsCreated,
-					"actions_updated":      result.ActionsUpdated,
-					"teams_created":        result.TeamsCreated,
-					"teams_updated":        result.TeamsUpdated,
-					"users_created":        result.UsersCreated,
-					"users_updated":        result.UsersUpdated,
-					"pages_created":        result.PagesCreated,
-					"pages_updated":        result.PagesUpdated,
-					"integrations_updated": result.IntegrationsUpdated,
+					"success":                       result.Success,
+					"message":                       result.Message,
+					"blueprints_created":            result.BlueprintsCreated,
+					"blueprints_updated":            result.BlueprintsUpdated,
+					"entities_created":              result.EntitiesCreated,
+					"entities_updated":              result.EntitiesUpdated,
+					"scorecards_created":            result.ScorecardsCreated,
+					"scorecards_updated":            result.ScorecardsUpdated,
+					"actions_created":               result.ActionsCreated,
+					"actions_updated":               result.ActionsUpdated,
+					"teams_created":                 result.TeamsCreated,
+					"teams_updated":                 result.TeamsUpdated,
+					"users_created":                 result.UsersCreated,
+					"users_updated":                 result.UsersUpdated,
+					"pages_created":                 result.PagesCreated,
+					"pages_updated":                 result.PagesUpdated,
+					"integrations_updated":          result.IntegrationsUpdated,
+					"blueprint_permissions_updated": result.BlueprintPermissionsUpdated,
+					"action_permissions_updated":    result.ActionPermissionsUpdated,
+					"page_permissions_updated":      result.PagePermissionsUpdated,
 				}
 				if len(result.Errors) > 0 {
 					jsonData["errors"] = result.Errors
 				}
+				if result.IgnoredRuleResultTargetRelationCount > 0 {
+					jsonData["ignored_rule_result_target_relations_count"] = result.IgnoredRuleResultTargetRelationCount
+					jsonData["ignored_rule_result_target_relation_keys"] = result.IgnoredRuleResultTargetRelationKeys
+				}
 				if showPagesPipeline && len(result.SidebarPipeline) > 0 {
 					jsonData["sidebar_pipeline"] = result.SidebarPipeline
 				}
-				return output.PrintJSON(jsonData)
+				output.PrintJSON(jsonData)
+				if !result.Success {
+					return fmt.Errorf("import completed with errors")
+				}
+				return nil
 			}
 
 			// Text output
-			output.SuccessPrintln("\n✓ Import completed successfully!")
+			if result.Success {
+				output.SuccessPrintln("\n✓ Import completed successfully!")
+			} else {
+				output.WarningPrintln("\n⚠ Import completed with errors")
+			}
 			output.Printf("%s\n", result.Message)
+			if result.IgnoredRuleResultTargetRelationCount > 0 {
+				output.Printf("\n_rule_result: ignored %d relation(s) with type rule_result_target (not sent to API): %s\n",
+					result.IgnoredRuleResultTargetRelationCount,
+					strings.Join(result.IgnoredRuleResultTargetRelationKeys, ", "))
+			}
 
 			// Show diff stats (always available now)
 			if result.DiffResult != nil {
@@ -322,6 +356,18 @@ Use --include to selectively import specific resource types.`,
 						len(result.DiffResult.IntegrationsToUpdate),
 						len(result.DiffResult.IntegrationsToSkip))
 				}
+				if len(result.DiffResult.BlueprintPermissions) > 0 {
+					output.Printf("  Blueprint permissions: %d to update\n",
+						len(result.DiffResult.BlueprintPermissions))
+				}
+				if len(result.DiffResult.ActionPermissions) > 0 {
+					output.Printf("  Action permissions: %d to update\n",
+						len(result.DiffResult.ActionPermissions))
+				}
+				if len(result.DiffResult.PagePermissions) > 0 {
+					output.Printf("  Page permissions: %d to update\n",
+						len(result.DiffResult.PagePermissions))
+				}
 				output.Printf("\n")
 			}
 
@@ -333,6 +379,11 @@ Use --include to selectively import specific resource types.`,
 			output.Printf("Users created: %d, updated: %d\n", result.UsersCreated, result.UsersUpdated)
 			output.Printf("Pages created: %d, updated: %d\n", result.PagesCreated, result.PagesUpdated)
 			output.Printf("Integrations updated: %d\n", result.IntegrationsUpdated)
+			if result.BlueprintPermissionsUpdated > 0 || result.ActionPermissionsUpdated > 0 || result.PagePermissionsUpdated > 0 {
+				output.Printf("Blueprint permissions updated: %d\n", result.BlueprintPermissionsUpdated)
+				output.Printf("Action permissions updated: %d\n", result.ActionPermissionsUpdated)
+				output.Printf("Page permissions updated: %d\n", result.PagePermissionsUpdated)
+			}
 
 			if showPagesPipeline && len(result.SidebarPipeline) > 0 {
 				output.Printf("\nSidebar pipeline used:\n")
@@ -355,28 +406,44 @@ Use --include to selectively import specific resource types.`,
 			}
 
 			// Show errors
-			if len(result.Errors) > 0 {
+			if len(result.Errors) > 0 && shouldPrintErrors(len(result.Errors), maxErrors) {
+				limit := errorLimit(len(result.Errors), maxErrors)
 				if verbose && len(result.ErrorsByCategory) > 0 {
 					// Verbose output: show errors grouped by category
 					output.Printf("\nErrors by category:\n")
 					categoryOrder := []string{"DEPENDENCY", "VALIDATION", "SCHEMA_MISMATCH", "BLUEPRINT_CONFIG", "AUTH", "NOT_FOUND", "CONFLICT", "RATE_LIMIT", "NETWORK", "UNKNOWN"}
+					displayed := 0
+				categories:
 					for _, category := range categoryOrder {
 						if errs, ok := result.ErrorsByCategory[category]; ok && len(errs) > 0 {
 							output.Printf("\n  %s (%d):\n", category, len(errs))
 							for _, errMsg := range errs {
+								if displayed >= limit {
+									break categories
+								}
 								output.Printf("    - %s\n", errMsg)
+								displayed++
 							}
 						}
+					}
+					if len(result.Errors) > displayed {
+						output.Printf("\n  ... and %d more\n", len(result.Errors)-displayed)
 					}
 				} else {
 					// Standard output: simple error list
 					output.Printf("\nErrors encountered:\n")
-					for _, errMsg := range result.Errors {
-						output.Printf("  - %s\n", errMsg)
+					for i := 0; i < limit; i++ {
+						output.Printf("  - %s\n", result.Errors[i])
+					}
+					if len(result.Errors) > limit {
+						output.Printf("  ... and %d more\n", len(result.Errors)-limit)
 					}
 				}
 			}
 
+			if !result.Success {
+				return fmt.Errorf("import completed with errors")
+			}
 			return nil
 		},
 	}
@@ -388,12 +455,17 @@ Use --include to selectively import specific resource types.`,
 	importCmd.Flags().BoolVar(&dryRun, "dry-run", false, "Validate import without applying changes")
 	importCmd.Flags().BoolVar(&skipEntities, "skip-entities", false, "Skip importing entities (only import schema and configuration)")
 	importCmd.Flags().BoolVar(&skipSystemBlueprints, "skip-system-blueprints", false, "Skip system blueprint schemas (identifiers starting with _) and their entities")
+	importCmd.Flags().BoolVar(&skipSystemBlueprintProperties, "skip-system-blueprint-properties", false, "When used with --skip-system-blueprints, do not import custom properties on known system blueprints")
+	importCmd.Flags().BoolVar(&includeRuleResults, "include-rule-results", true, "Include _rule_result system blueprint entities (use --include-rule-results=false to exclude)")
 	importCmd.Flags().StringVar(&include, "include", "", "Comma-separated list of resources to import (e.g., 'blueprints,pages'). Available: blueprints, entities, scorecards, actions, teams, users, automations, pages, integrations. If not specified, imports all resources.")
 	importCmd.Flags().StringVar(&excludeBlueprints, "exclude-blueprints", "", "Comma-separated blueprint IDs to exclude entirely (schema + entities + scorecards + actions)")
 	importCmd.Flags().StringVar(&excludeBlueprintSchema, "exclude-blueprint-schema", "", "Comma-separated blueprint IDs to exclude schema only (entities, scorecards, actions still imported)")
 	importCmd.Flags().StringVar(&outputFormat, "output-format", "text", "Output format: text or json")
 	importCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Show detailed error information with categorization")
 	importCmd.Flags().BoolVar(&showPagesPipeline, "show-pages-pipeline", false, "Show the planned sidebar pages/folders pipeline before execution and include the pipeline used in the output")
+	importCmd.Flags().BoolVar(&usersAsDisabled, "users-as-disabled", false, "Import non-admin users as DISABLED (admin users are imported normally)")
+	importCmd.Flags().IntVar(&maxErrors, "max-errors", defaultMaxErrors, "Maximum number of errors to show in text output (-1 hides errors, 0 shows all)")
+	importCmd.Flags().StringArrayVar(&onError, "on-error", nil, "Handle a Port API error type (repeatable, e.g. forbidden_format_change=ignore-property or forbidden_format_change=recreate-property)")
 
 	rootCmd.AddCommand(importCmd)
 }

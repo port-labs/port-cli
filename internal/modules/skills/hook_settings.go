@@ -25,7 +25,7 @@ type settingsHookEntry struct {
 	Command string `json:"command"`
 }
 
-func (w settingsHookWriter) Write(dir string) error {
+func (w settingsHookWriter) Write(dir, command string) error {
 	path := filepath.Join(dir, "settings.json")
 
 	raw, err := readJSONFileMap(path)
@@ -36,7 +36,7 @@ func (w settingsHookWriter) Write(dir string) error {
 		raw = map[string]interface{}{}
 	}
 
-	portHook := w.buildPortHook()
+	portHook := w.buildPortHook(command)
 
 	if w.topLevelArray {
 		w.mergeArrayLayout(raw, portHook)
@@ -70,9 +70,9 @@ func (w settingsHookWriter) Remove(dir string) (bool, error) {
 	return changed, writeJSONFile(path, raw)
 }
 
-func (w settingsHookWriter) buildPortHook() map[string]interface{} {
+func (w settingsHookWriter) buildPortHook(command string) map[string]interface{} {
 	inner := []settingsHookEntry{
-		{Type: "command", Command: hookCommand},
+		{Type: "command", Command: command},
 	}
 	if w.topLevelArray {
 		return map[string]interface{}{

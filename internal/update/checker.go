@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/port-experimental/port-cli/internal/useragent"
+	"github.com/port-labs/port-cli/internal/useragent"
 )
 
 const (
@@ -17,7 +17,7 @@ const (
 	cacheTTL  = 24 * time.Hour
 )
 
-var releasesURL = "https://api.github.com/repos/port-experimental/port-cli/releases/latest"
+var releasesURL = "https://api.github.com/repos/port-labs/port-cli/releases/latest"
 
 // CheckResult represents the result of an update check.
 type CheckResult struct {

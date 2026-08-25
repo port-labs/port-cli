@@ -8,9 +8,9 @@ import (
 
 	"charm.land/huh/v2"
 	"charm.land/lipgloss/v2"
-	"github.com/port-experimental/port-cli/internal/auth"
-	"github.com/port-experimental/port-cli/internal/config"
-	"github.com/port-experimental/port-cli/internal/styles"
+	"github.com/port-labs/port-cli/internal/auth"
+	"github.com/port-labs/port-cli/internal/config"
+	"github.com/port-labs/port-cli/internal/styles"
 	"github.com/spf13/cobra"
 )
 
@@ -18,8 +18,8 @@ import (
 func RegisterAuth(rootCmd *cobra.Command) {
 	authCmd := &cobra.Command{
 		Use:   "auth",
-		Short: "Authenticate the cli with Port",
-		Long:  "Authenticate the cli with Port using SSO",
+		Short: "Authenticate the CLI with Port",
+		Long:  "Authenticate the CLI with Port using SSO",
 	}
 
 	authCmd.AddCommand(registerLogin())

@@ -5,7 +5,29 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/port-labs/port-cli/internal/config"
 )
+
+// ErrorOutput is the structured JSON representation of a command error.
+type ErrorOutput struct {
+	Success    bool   `json:"success"`
+	Error      string `json:"error"`
+	Suggestion string `json:"suggestion,omitempty"`
+	ErrorCode  string `json:"error_code,omitempty"`
+}
+
+// PrintJSONError prints an error using a stable machine-readable shape.
+func PrintJSONError(err error) error {
+	if err == nil {
+		return nil
+	}
+	return PrintJSON(ErrorOutput{
+		Success:    false,
+		Error:      err.Error(),
+		Suggestion: getSuggestion(err.Error()),
+		ErrorCode:  getErrorCode(err.Error()),
+	})
+}
 
 // ErrorContext provides additional context for errors.
 type ErrorContext struct {
@@ -30,13 +52,17 @@ func FormatError(err error) string {
 	var parts []string
 
 	if suggestion != "" {
-		parts = append(parts, lipgloss.NewStyle().MarginLeft(2).MarginBottom(1).Render(
-			lipgloss.JoinVertical(lipgloss.Left,
-				lipgloss.NewStyle().Background(lipgloss.Blue).Bold(true).Foreground(lipgloss.Color("#FFF")).Padding(0, 1).Margin(1, 0).
-					Render("SUGGESTION"),
-				suggestion,
-			)),
-		)
+		if !Enabled() {
+			parts = append(parts, "Suggestion: "+suggestion)
+		} else {
+			parts = append(parts, lipgloss.NewStyle().MarginLeft(2).MarginBottom(1).Render(
+				lipgloss.JoinVertical(lipgloss.Left,
+					lipgloss.NewStyle().Background(lipgloss.Blue).Bold(true).Foreground(lipgloss.Color("#FFF")).Padding(0, 1).Margin(1, 0).
+						Render("SUGGESTION"),
+					suggestion,
+				)),
+			)
+		}
 	}
 
 	if errorCode != "" {
@@ -75,16 +101,24 @@ func getSuggestion(errMsg string) string {
 	lowerMsg := strings.ToLower(errMsg)
 
 	switch {
+	case strings.Contains(lowerMsg, "organization") && strings.Contains(lowerMsg, "not found"):
+		return fmt.Sprintf("Verify the organization name is correct. Run `%s` to see configured organizations", config.CmdConfigShow)
 	case strings.Contains(lowerMsg, "configuration not found") || strings.Contains(lowerMsg, "config"):
-		return "Run `port config --init` to create a configuration file"
+		return fmt.Sprintf("Run `%s` to create a configuration file", config.CmdConfigInit)
 	case strings.Contains(lowerMsg, "credentials") || strings.Contains(lowerMsg, "401") || strings.Contains(lowerMsg, "unauthorized"):
-		return "Check your credentials. Run `port auth login` to log in or run `port config --show` to view current configuration"
+		return fmt.Sprintf(
+			"Check your credentials. Run `%s` to log in or run `%s` to view current configuration",
+			config.CmdAuthLogin,
+			config.CmdConfigShow,
+		)
 	case strings.Contains(lowerMsg, "file not found") || strings.Contains(lowerMsg, "no such file"):
 		return "Check that the file path is correct and the file exists"
-	case strings.Contains(lowerMsg, "organization") && strings.Contains(lowerMsg, "not found"):
-		return "Verify the organization name is correct. Run `port config --show` to see configured organizations"
+	case strings.Contains(lowerMsg, "blueprint") && strings.Contains(lowerMsg, "not found"):
+		return "Verify the blueprint identifier is correct. Use `port api blueprints list` to see available blueprints"
 	case strings.Contains(lowerMsg, "403") || strings.Contains(lowerMsg, "forbidden"):
 		return "Check that your credentials have the necessary permissions"
+	case strings.Contains(lowerMsg, "skills are not available"):
+		return "Skills may not be enabled for your Port organization yet. Ask your Port admin to enable skills, then verify api_url / PORT_API_URL and --org"
 	case strings.Contains(lowerMsg, "404") || strings.Contains(lowerMsg, "not found"):
 		return "The requested resource may not exist or you may not have access to it"
 	case strings.Contains(lowerMsg, "timeout") || strings.Contains(lowerMsg, "connection"):
@@ -121,6 +155,8 @@ func getErrorCode(errMsg string) string {
 		return "RATE_LIMIT"
 	case strings.Contains(lowerMsg, "validation"):
 		return "VALIDATION_ERROR"
+	case strings.Contains(lowerMsg, "blueprint") && strings.Contains(lowerMsg, "not found"):
+		return "BLUEPRINT_NOT_FOUND"
 	case strings.Contains(lowerMsg, "organization") && strings.Contains(lowerMsg, "not found"):
 		return "ORG_NOT_FOUND"
 	default:

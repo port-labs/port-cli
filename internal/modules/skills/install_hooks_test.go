@@ -15,7 +15,7 @@ func TestInstallHooks_WritesHookPerFormat(t *testing.T) {
 		mustContain []string
 	}{
 		{
-			name: "JSON (Cursor/Codex/Copilot)", format: hookFormatJSON,
+			name: "JSON (Cursor/Codex)", format: hookFormatJSON,
 			subdir: "tooldir", hookFile: "hooks.json",
 			mustContain: []string{"sessionStart", hookCommand},
 		},
@@ -40,7 +40,7 @@ func TestInstallHooks_WritesHookPerFormat(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			dir := t.TempDir()
 			targets := []HookTarget{{Name: "Test", Dir: tt.subdir, Format: tt.format}}
-			if err := InstallHooks(targets, dir, dir); err != nil {
+			if err := InstallHooks(targets, dir, dir, ""); err != nil {
 				t.Fatalf("InstallHooks: %v", err)
 			}
 			data, _ := os.ReadFile(filepath.Join(dir, tt.subdir, tt.hookFile))
@@ -58,11 +58,45 @@ func TestInstallHooks_RepoScopedTarget(t *testing.T) {
 	homeDir, repoDir := t.TempDir(), t.TempDir()
 	targets := []HookTarget{{Name: "Copilot", Dir: ".github/hooks", Format: hookFormatJSON, RepoScoped: true}}
 
-	if err := InstallHooks(targets, homeDir, repoDir); err != nil {
+	if err := InstallHooks(targets, homeDir, repoDir, ""); err != nil {
 		t.Fatalf("InstallHooks: %v", err)
 	}
 	assertFileExists(t, filepath.Join(repoDir, ".github", "hooks", "hooks.json"))
 	assertFileAbsent(t, filepath.Join(homeDir, ".github", "hooks", "hooks.json"))
+}
+
+func TestInstallHooks_GitHubCopilotHooksUseAgentSchema(t *testing.T) {
+	homeDir, repoDir := t.TempDir(), t.TempDir()
+	copilot := HookTarget{
+		Name: "GitHub Copilot", Dir: ".github", RepoScoped: true, HookSubDir: "hooks",
+		Format: hookFormatCopilotJSON,
+	}
+	if err := InstallHooks([]HookTarget{copilot}, homeDir, repoDir, ""); err != nil {
+		t.Fatalf("InstallHooks: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(repoDir, ".github", "hooks", "hooks.json"))
+	if err != nil {
+		t.Fatalf("read hooks.json: %v", err)
+	}
+	body := string(data)
+	for _, frag := range []string{
+		`"version"`,
+		`"sessionStart"`,
+		`"type"`,
+		`"command"`,
+		`"bash"`,
+		`"powershell"`,
+		`"cwd"`,
+		`"timeoutSec"`,
+		hookCommand,
+	} {
+		if !containsStr(body, frag) {
+			t.Errorf("hooks.json missing expected fragment %q in:\n%s", frag, body)
+		}
+	}
+	if containsStr(body, `"command": "`+hookCommand) {
+		t.Error("should not use Cursor-style {\"command\": ...} for the Port hook; use type/bash/powershell per GitHub Copilot docs")
+	}
 }
 
 func TestInstallHooks_MergesExistingJSONHook(t *testing.T) {
@@ -77,7 +111,7 @@ func TestInstallHooks_MergesExistingJSONHook(t *testing.T) {
 	}
 
 	targets := []HookTarget{{Name: "Tool", Dir: "tool", Format: hookFormatJSON}}
-	if err := InstallHooks(targets, dir, dir); err != nil {
+	if err := InstallHooks(targets, dir, dir, ""); err != nil {
 		t.Fatalf("InstallHooks: %v", err)
 	}
 
@@ -97,7 +131,7 @@ func TestInstallHooks_XDGAndEnvOverride(t *testing.T) {
 		customDir := filepath.Join(dir, "custom-cursor")
 		t.Setenv("CURSOR_CONFIG_DIR", customDir)
 		targets := []HookTarget{{Name: "Cursor", Dir: ".cursor", Format: hookFormatJSON, EnvOverride: "CURSOR_CONFIG_DIR", XDGDir: "cursor"}}
-		if err := InstallHooks(targets, dir, dir); err != nil {
+		if err := InstallHooks(targets, dir, dir, ""); err != nil {
 			t.Fatalf("InstallHooks: %v", err)
 		}
 		assertFileExists(t, filepath.Join(customDir, "hooks.json"))
@@ -110,7 +144,7 @@ func TestInstallHooks_XDGAndEnvOverride(t *testing.T) {
 		t.Setenv("CURSOR_CONFIG_DIR", "")
 		t.Setenv("XDG_CONFIG_HOME", xdgDir)
 		targets := []HookTarget{{Name: "Cursor", Dir: ".cursor", Format: hookFormatJSON, EnvOverride: "CURSOR_CONFIG_DIR", XDGDir: "cursor"}}
-		if err := InstallHooks(targets, dir, dir); err != nil {
+		if err := InstallHooks(targets, dir, dir, ""); err != nil {
 			t.Fatalf("InstallHooks: %v", err)
 		}
 		assertFileExists(t, filepath.Join(xdgDir, "cursor", "hooks.json"))

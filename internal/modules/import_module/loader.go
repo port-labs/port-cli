@@ -10,8 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/port-experimental/port-cli/internal/api"
-	"github.com/port-experimental/port-cli/internal/modules/export"
+	"github.com/port-labs/port-cli/internal/api"
+	"github.com/port-labs/port-cli/internal/modules/export"
 )
 
 // Loader loads data from tar.gz or JSON files.
@@ -92,52 +92,47 @@ func (l *Loader) loadTar(tarPath string) (*export.Data, error) {
 		// Determine data type from filename
 		dataType := strings.TrimSuffix(header.Name, ".json")
 
-		// Read file content
-		content := make([]byte, header.Size)
-		if _, err := io.ReadFull(tr, content); err != nil && err != io.EOF {
-			return nil, fmt.Errorf("failed to read tar file content: %w", err)
-		}
-
 		// Parse JSON and assign to appropriate field
+		dec := json.NewDecoder(tr)
 		switch dataType {
 		case "blueprints":
 			var items []api.Blueprint
-			if err := json.Unmarshal(content, &items); err != nil {
+			if err := dec.Decode(&items); err != nil {
 				return nil, fmt.Errorf("failed to parse blueprints: %w", err)
 			}
 			data.Blueprints = items
 
 		case "entities":
 			var items []api.Entity
-			if err := json.Unmarshal(content, &items); err != nil {
+			if err := dec.Decode(&items); err != nil {
 				return nil, fmt.Errorf("failed to parse entities: %w", err)
 			}
 			data.Entities = items
 
 		case "scorecards":
 			var items []api.Scorecard
-			if err := json.Unmarshal(content, &items); err != nil {
+			if err := dec.Decode(&items); err != nil {
 				return nil, fmt.Errorf("failed to parse scorecards: %w", err)
 			}
 			data.Scorecards = items
 
 		case "actions":
 			var items []api.Action
-			if err := json.Unmarshal(content, &items); err != nil {
+			if err := dec.Decode(&items); err != nil {
 				return nil, fmt.Errorf("failed to parse actions: %w", err)
 			}
 			data.Actions = items
 
 		case "teams":
 			var items []api.Team
-			if err := json.Unmarshal(content, &items); err != nil {
+			if err := dec.Decode(&items); err != nil {
 				return nil, fmt.Errorf("failed to parse teams: %w", err)
 			}
 			data.Teams = items
 
 		case "users":
 			var items []api.User
-			if err := json.Unmarshal(content, &items); err != nil {
+			if err := dec.Decode(&items); err != nil {
 				return nil, fmt.Errorf("failed to parse users: %w", err)
 			}
 			data.Users = items
@@ -145,45 +140,52 @@ func (l *Loader) loadTar(tarPath string) (*export.Data, error) {
 		case "automations":
 			// Backward compatibility: merge automations into actions
 			var items []api.Action
-			if err := json.Unmarshal(content, &items); err != nil {
+			if err := dec.Decode(&items); err != nil {
 				return nil, fmt.Errorf("failed to parse automations: %w", err)
 			}
 			data.Actions = append(data.Actions, items...)
 
 		case "pages":
 			var items []api.Page
-			if err := json.Unmarshal(content, &items); err != nil {
+			if err := dec.Decode(&items); err != nil {
 				return nil, fmt.Errorf("failed to parse pages: %w", err)
 			}
 			data.Pages = items
 
 		case "_folders":
 			var items []api.Folder
-			if err := json.Unmarshal(content, &items); err != nil {
+			if err := dec.Decode(&items); err != nil {
 				return nil, fmt.Errorf("failed to parse folders: %w", err)
 			}
 			data.Folders = items
 
 		case "integrations":
 			var items []api.Integration
-			if err := json.Unmarshal(content, &items); err != nil {
+			if err := dec.Decode(&items); err != nil {
 				return nil, fmt.Errorf("failed to parse integrations: %w", err)
 			}
 			data.Integrations = items
 
 		case "blueprint_permissions":
 			var items map[string]api.Permissions
-			if err := json.Unmarshal(content, &items); err != nil {
+			if err := dec.Decode(&items); err != nil {
 				return nil, fmt.Errorf("failed to parse blueprint permissions: %w", err)
 			}
 			data.BlueprintPermissions = items
 
 		case "action_permissions":
 			var items map[string]api.Permissions
-			if err := json.Unmarshal(content, &items); err != nil {
+			if err := dec.Decode(&items); err != nil {
 				return nil, fmt.Errorf("failed to parse action permissions: %w", err)
 			}
 			data.ActionPermissions = items
+
+		case "page_permissions":
+			var items map[string]api.Permissions
+			if err := dec.Decode(&items); err != nil {
+				return nil, fmt.Errorf("failed to parse page permissions: %w", err)
+			}
+			data.PagePermissions = items
 		}
 	}
 
@@ -297,11 +299,64 @@ func (l *Loader) loadJSON(jsonPath string) (*export.Data, error) {
 		}
 	}
 
+	for _, key := range []string{"BlueprintPermissions", "blueprint_permissions"} {
+		if perms, ok := rawData[key].(map[string]interface{}); ok {
+			data.BlueprintPermissions = make(map[string]api.Permissions)
+			for id, p := range perms {
+				if pMap, ok := p.(map[string]interface{}); ok {
+					data.BlueprintPermissions[id] = api.Permissions(pMap)
+				}
+			}
+			break
+		}
+	}
+
+	for _, key := range []string{"ActionPermissions", "action_permissions"} {
+		if perms, ok := rawData[key].(map[string]interface{}); ok {
+			data.ActionPermissions = make(map[string]api.Permissions)
+			for id, p := range perms {
+				if pMap, ok := p.(map[string]interface{}); ok {
+					data.ActionPermissions[id] = api.Permissions(pMap)
+				}
+			}
+			break
+		}
+	}
+
+	for _, key := range []string{"PagePermissions", "page_permissions"} {
+		if perms, ok := rawData[key].(map[string]interface{}); ok {
+			data.PagePermissions = make(map[string]api.Permissions)
+			for id, p := range perms {
+				if pMap, ok := p.(map[string]interface{}); ok {
+					data.PagePermissions[id] = api.Permissions(pMap)
+				}
+			}
+			break
+		}
+	}
+
 	return data, nil
 }
 
 // ValidateData validates the loaded data structure.
-func (l *Loader) ValidateData(data *export.Data) error {
+// When includeResources is non-empty, blueprints are only required if
+// blueprints (or blueprint-dependent types like entities/scorecards) are
+// being imported. Org-level resources (pages, integrations, teams, users)
+// can be imported without blueprints in the file.
+func (l *Loader) ValidateData(data *export.Data, includeResources []string) error {
+	if len(includeResources) > 0 {
+		blueprintsNeeded := false
+		for _, r := range includeResources {
+			switch r {
+			case "blueprints", "entities", "scorecards", "blueprint-permissions":
+				blueprintsNeeded = true
+			}
+		}
+		if blueprintsNeeded && len(data.Blueprints) == 0 {
+			return fmt.Errorf("missing required data: blueprints")
+		}
+		return nil
+	}
 	if len(data.Blueprints) == 0 {
 		return fmt.Errorf("missing required data: blueprints")
 	}

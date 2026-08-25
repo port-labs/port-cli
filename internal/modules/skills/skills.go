@@ -1,184 +1,63 @@
 package skills
 
 import (
-	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
-
-	"github.com/port-experimental/port-cli/internal/api"
 )
 
-// SkillFile represents a reference or asset file attached to a skill.
-type SkillFile struct {
-	Path    string
-	Content string
-}
-
-// SkillLocation controls where a skill is written on disk.
-type SkillLocation string
-
-const (
-	SkillLocationGlobal  SkillLocation = "global"
-	SkillLocationProject SkillLocation = "project"
+var (
+	skillFrontmatterPattern                 = regexp.MustCompile(`(?s)(?:^|\n)---[ \t]*\n(.*?)\n---[ \t]*(?:\n|$)`)
+	skillFrontmatterNamePattern             = regexp.MustCompile(`(?m)^[ \t]*name[ \t]*:[ \t]*(?:"([^"\n]*)"|'([^'\n]*)'|([^#\n]*?))[ \t]*(?:#.*)?$`)
+	skillFrontmatterDescriptionPattern      = regexp.MustCompile(`(?m)^[ \t]*description[ \t]*:`)
+	skillFrontmatterDescriptionValuePattern = regexp.MustCompile(
+		`(?m)^[ \t]*description[ \t]*:[ \t]*(?:"([^"\n]*)"|'([^'\n]*)'|([^#\n]*?))[ \t]*(?:#.*)?$`,
+	)
 )
 
-// Skill holds the data for a single skill entity fetched from Port.
-type Skill struct {
-	Identifier   string
-	Title        string
-	Description  string
-	Instructions string
-	GroupID      string
-	Required     bool
-	Location     SkillLocation
-	References   []SkillFile
-	Assets       []SkillFile
-}
-
-// SkillGroup holds the data for a single skill_group entity fetched from Port.
-type SkillGroup struct {
-	Identifier string
-	Title      string
-	Required   bool
-	SkillIDs   []string
-}
-
-// FetchedSkills contains skills split by whether they are required.
-type FetchedSkills struct {
-	Required []Skill
-	Optional []Skill
-	Groups   []SkillGroup
-}
-
-// FetchSkills retrieves all skill groups and skills from the Port API and
-// partitions them into required vs optional.
-func FetchSkills(ctx context.Context, client *api.Client) (*FetchedSkills, error) {
-	groupEntities, err := client.GetSkillGroups(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch skill groups: %w", err)
-	}
-
-	skillEntities, err := client.GetSkills(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch skills: %w", err)
-	}
-
-	return ParseFetchedSkills(groupEntities, skillEntities), nil
-}
-
-// ParseFetchedSkills builds a FetchedSkills from raw API entities.
-// Exported so tests can exercise parsing without hitting the network.
-func ParseFetchedSkills(groupEntities, skillEntities []api.Entity) *FetchedSkills {
-	groups := make([]SkillGroup, 0, len(groupEntities))
-	requiredSkillIDs := make(map[string]bool)
-	skillGroupMap := make(map[string]string)
-
-	for _, e := range groupEntities {
-		props, _ := e["properties"].(map[string]interface{})
-		relations, _ := e["relations"].(map[string]interface{})
-
-		groupID := stringProp(e, "identifier")
-		enforcement := stringFromMap(props, "enforcement")
-		isRequired := enforcement == "required"
-
-		var skillIDs []string
-		if rel, ok := relations["skills"]; ok {
-			if items, ok := rel.([]interface{}); ok {
-				for _, item := range items {
-					if sid, ok := item.(string); ok {
-						skillIDs = append(skillIDs, sid)
-						skillGroupMap[sid] = groupID
-						if isRequired {
-							requiredSkillIDs[sid] = true
-						}
-					}
-				}
-			}
-		}
-
-		groups = append(groups, SkillGroup{
-			Identifier: groupID,
-			Title:      stringProp(e, "title"),
-			Required:   isRequired,
-			SkillIDs:   skillIDs,
-		})
-	}
-
-	result := &FetchedSkills{Groups: groups}
-	for _, e := range skillEntities {
-		props, _ := e["properties"].(map[string]interface{})
-		skillID := stringProp(e, "identifier")
-
-		skill := Skill{
-			Identifier:   skillID,
-			Title:        stringProp(e, "title"),
-			Description:  stringFromMap(props, "description"),
-			Instructions: stringFromMap(props, "instructions"),
-			GroupID:      skillGroupMap[skillID],
-			Required:     requiredSkillIDs[skillID],
-			Location:     parseSkillLocation(stringFromMap(props, "location")),
-			References:   parseSkillFiles(props, "references"),
-			Assets:       parseSkillFiles(props, "assets"),
-		}
-
-		if skill.Required {
-			result.Required = append(result.Required, skill)
-		} else {
-			result.Optional = append(result.Optional, skill)
-		}
-	}
-
-	return result
-}
-
-func parseSkillLocation(raw string) SkillLocation {
-	if raw == string(SkillLocationProject) {
-		return SkillLocationProject
-	}
-	return SkillLocationGlobal
-}
-
-func parseSkillFiles(props map[string]interface{}, key string) []SkillFile {
-	if props == nil {
-		return nil
-	}
-	raw, ok := props[key].([]interface{})
-	if !ok {
-		return nil
-	}
-	var files []SkillFile
-	for _, item := range raw {
-		m, ok := item.(map[string]interface{})
-		if !ok {
+func filterOrphanSkillFiles(skill Skill, files []SkillFile) []SkillFile {
+	filtered := make([]SkillFile, 0, len(files))
+	for _, file := range files {
+		if isOrphanSkillFile(skill, file.Path) {
 			continue
 		}
-		path := stringFromMap(m, "path")
-		content := stringFromMap(m, "content")
-		if path != "" && content != "" {
-			files = append(files, SkillFile{Path: path, Content: content})
-		}
+		filtered = append(filtered, file)
 	}
-	return files
+	return filtered
 }
 
-// FilterSkills returns the union of all required skills plus the optional
-// skills matching the provided selection criteria.
-func FilterSkills(fetched *FetchedSkills, selectAll, selectAllGroups, selectAllUngrouped bool, selectedGroups, selectedSkills []string) []Skill {
-	var result []Skill
-	result = append(result, fetched.Required...)
+func isOrphanSkillFile(skill Skill, path string) bool {
+	parts, ok := pathPartsAfterSkillsDir(path)
+	if !ok {
+		return false
+	}
+	skillDirName, err := skillDirName(skill)
+	if err != nil {
+		return true
+	}
+	_, found := trimToSkillDir(parts, skillDirName, skill)
+	return !found
+}
 
+// FilterSkills returns skills matching the provided selection criteria.
+func FilterSkills(fetched *FetchedSkills, selectAll, selectAllGroups, selectAllUngrouped bool, selectedGroups, selectedSkills []string, serverFilteredGroups bool) []Skill {
 	if selectAll {
-		result = append(result, fetched.Optional...)
-		return result
+		return append([]Skill(nil), fetched.Skills...)
 	}
 
 	selectedGroupSet := toSet(selectedGroups)
 	selectedSkillSet := toSet(selectedSkills)
 
-	for _, s := range fetched.Optional {
-		ungrouped := s.GroupID == ""
+	var result []Skill
+	for _, s := range fetched.Skills {
+		ungrouped := len(s.GroupIDs) == 0
+		if !ungrouped && serverFilteredGroups {
+			result = append(result, s)
+			continue
+		}
 		switch {
 		case ungrouped && selectAllUngrouped:
 			result = append(result, s)
@@ -186,13 +65,22 @@ func FilterSkills(fetched *FetchedSkills, selectAll, selectAllGroups, selectAllU
 			result = append(result, s)
 		case !ungrouped && selectAllGroups:
 			result = append(result, s)
-		case !ungrouped && selectedGroupSet[s.GroupID]:
+		case !ungrouped && anyGroupSelected(selectedGroupSet, s.GroupIDs):
 			result = append(result, s)
 		case selectedSkillSet[s.Identifier]:
 			result = append(result, s)
 		}
 	}
 	return result
+}
+
+func anyGroupSelected(selectedGroupSet map[string]bool, groupIDs []string) bool {
+	for _, gid := range groupIDs {
+		if selectedGroupSet[gid] {
+			return true
+		}
+	}
+	return false
 }
 
 // GroupName resolves the display name for a group, falling back to its identifier.
@@ -211,19 +99,38 @@ func GroupName(groups []SkillGroup, groupID string) string {
 	return NoGroupDir
 }
 
-const (
-	NoGroupDir    = "_skills_without_group"
-	PortSkillsDir = "port"
-)
+const portSkillsManifestFile = ".port-skills-manifest.json"
 
-type skillKey struct{ group, skill string }
+type portSkillsManifest struct {
+	Skills []portSkillsManifestEntry `json:"skills"`
+}
 
-// WriteSkills writes SKILL.md files (plus references and assets) for each skill,
+type portSkillsManifestEntry struct {
+	Identifier string `json:"identifier"`
+	Name       string `json:"name"`
+}
+
+type WriteSkillsOptions struct {
+	FailOnSkillError bool
+}
+
+type preparedSkill struct {
+	skill Skill
+	name  string
+}
+
+// WriteSkills writes SKILL.md files (plus references, assets, scripts, and
+// additional files) for each skill,
 // routing each one based on its Location property:
 //   - SkillLocationGlobal  → written into every dir in globalTargets
 //   - SkillLocationProject → written into the matching tool sub-directory
-//     inside every projectDir (e.g. <projectDir>/.agents/skills/port/…)
+//     inside every projectDir (e.g. <projectDir>/.agents/skills/…)
 func WriteSkills(skills []Skill, groups []SkillGroup, globalTargets []string, projectDirs []string) error {
+	_, err := WriteSkillsWithOptions(skills, groups, globalTargets, projectDirs, WriteSkillsOptions{FailOnSkillError: true})
+	return err
+}
+
+func WriteSkillsWithOptions(skills []Skill, groups []SkillGroup, globalTargets []string, projectDirs []string, opts WriteSkillsOptions) ([]string, error) {
 	globalSkills := make([]Skill, 0, len(skills))
 	projectSkills := make([]Skill, 0)
 	for _, s := range skills {
@@ -234,24 +141,60 @@ func WriteSkills(skills []Skill, groups []SkillGroup, globalTargets []string, pr
 		}
 	}
 
-	if err := writeSkillsToTargets(globalSkills, globalTargets); err != nil {
-		return err
-	}
-
-	if len(projectDirs) > 0 && len(projectSkills) > 0 {
-		projectTargets := buildProjectTargets(globalTargets, projectDirs)
-		if err := writeSkillsToTargets(projectSkills, projectTargets); err != nil {
-			return err
+	skillsByDir := make(map[string][]Skill)
+	addSkillsForTargets := func(targets []string, list []Skill) {
+		for _, target := range targets {
+			skillsDir := skillsDirForTarget(target)
+			skillsByDir[skillsDir] = append(skillsByDir[skillsDir], list...)
 		}
 	}
+	addSkillsForTargets(globalTargets, globalSkills)
+	// Always process project targets when project dirs are configured, even if no
+	// skill is currently project-scoped: a skill whose location just changed away
+	// from "project" (or was removed) still needs its stale project-dir copy
+	// reconciled away by writeSkillsToDir.
+	if len(projectDirs) > 0 {
+		addSkillsForTargets(buildProjectTargets(globalTargets, projectDirs), projectSkills)
+	}
 
-	return nil
+	var warnings []string
+	for skillsDir, list := range skillsByDir {
+		dirWarnings, err := writeSkillsToDir(mergeSkillsByIdentifier(list), skillsDir, opts)
+		warnings = append(warnings, dirWarnings...)
+		if err != nil {
+			return warnings, err
+		}
+	}
+	return warnings, nil
+}
+
+func skillsDirForTarget(target string) string {
+	return filepath.Join(expandHome(target), "skills")
+}
+
+func mergeSkillsByIdentifier(skills []Skill) []Skill {
+	if len(skills) == 0 {
+		return nil
+	}
+	byID := make(map[string]Skill, len(skills))
+	order := make([]string, 0, len(skills))
+	for _, s := range skills {
+		if _, seen := byID[s.Identifier]; !seen {
+			order = append(order, s.Identifier)
+		}
+		byID[s.Identifier] = s
+	}
+	out := make([]Skill, 0, len(order))
+	for _, id := range order {
+		out = append(out, byID[id])
+	}
+	return out
 }
 
 // buildProjectTargets creates project-level target paths by combining each
 // project directory with the tool sub-directory derived from the global
-// targets. When a tool defines a ProjectDir override (e.g. GitHub Copilot
-// uses ~/.copilot globally but .github in repos), that override is used.
+// targets. When a tool defines a ProjectDir override, that name is used under
+// each project dir instead of Dir (rare; most tools use Dir only).
 func buildProjectTargets(globalTargets []string, projectDirs []string) []string {
 	toolDirs := extractProjectDirs(globalTargets)
 	seen := make(map[string]bool)
@@ -272,6 +215,7 @@ func buildProjectTargets(globalTargets []string, projectDirs []string) []string 
 // project-scoped skills. For each global target it checks known hook targets:
 // if the target has a ProjectDir override that directory is used, otherwise
 // the target's Dir is used. Unrecognized paths fall back to the base name.
+// Legacy GitHub Copilot paths ending in /.copilot map to ".github".
 func extractProjectDirs(globalTargets []string) []string {
 	knownTargets := DefaultHookTargets()
 	seen := make(map[string]bool)
@@ -304,117 +248,230 @@ func extractProjectDirs(globalTargets []string) []string {
 	return dirs
 }
 
-func writeSkillsToTargets(skills []Skill, targets []string) error {
-	expected := make(map[skillKey]bool, len(skills))
-	for _, s := range skills {
-		groupDir := s.GroupID
-		if groupDir == "" {
-			groupDir = NoGroupDir
-		}
-		expected[skillKey{groupDir, s.Identifier}] = true
+func writeSkillsToDir(skills []Skill, skillsDir string, opts WriteSkillsOptions) ([]string, error) {
+	prepared, skipped, warnings, err := prepareSkillsForWrite(skills, opts)
+	if err != nil {
+		return warnings, err
 	}
 
-	for _, target := range targets {
-		expanded := expandHome(target)
-		portDir := filepath.Join(expanded, "skills", PortSkillsDir)
+	previousManifest, err := readPortSkillsManifest(skillsDir)
+	if err != nil {
+		return warnings, err
+	}
 
-		for _, s := range skills {
-			groupDir := s.GroupID
-			if groupDir == "" {
-				groupDir = NoGroupDir
-			}
+	expected := make(map[string]bool)
+	manifest := portSkillsManifest{Skills: make([]portSkillsManifestEntry, 0, len(prepared))}
+	for _, item := range prepared {
+		expected[item.name] = true
+		manifest.Skills = append(manifest.Skills, portSkillsManifestEntry{
+			Identifier: item.skill.Identifier,
+			Name:       item.name,
+		})
+	}
+	for _, entry := range previousManifest.Skills {
+		// Only carry forward a skipped skill's stale manifest entry if its
+		// directory name isn't already claimed by a skill written in this
+		// run. Otherwise two identifiers would map to the same directory in
+		// the manifest, and a later unload of the skipped identifier would
+		// delete the directory that now belongs to the live, prepared skill
+		// (removeSkillFromDir matches by Identifier, not by Name).
+		if skipped[entry.Identifier] && !expected[entry.Name] {
+			expected[entry.Name] = true
+			manifest.Skills = append(manifest.Skills, entry)
+		}
+	}
 
-			if err := validatePathComponent(groupDir); err != nil {
-				return fmt.Errorf("invalid group ID %q: %w", groupDir, err)
-			}
-			if err := validatePathComponent(s.Identifier); err != nil {
-				return fmt.Errorf("invalid skill identifier %q: %w", s.Identifier, err)
-			}
-
-			skillDir := filepath.Join(portDir, groupDir, s.Identifier)
-			if err := os.MkdirAll(skillDir, 0o755); err != nil {
-				return fmt.Errorf("failed to create skill directory %s: %w", skillDir, err)
-			}
-
-			content := buildSkillMD(s)
-			if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(content), 0o644); err != nil {
-				return fmt.Errorf("failed to write SKILL.md for %s: %w", s.Identifier, err)
-			}
-
-			for _, f := range s.References {
-				if err := writeSkillFile(skillDir, f); err != nil {
-					return fmt.Errorf("failed to write reference file %s for skill %s: %w", f.Path, s.Identifier, err)
-				}
-			}
-			for _, f := range s.Assets {
-				if err := writeSkillFile(skillDir, f); err != nil {
-					return fmt.Errorf("failed to write asset file %s for skill %s: %w", f.Path, s.Identifier, err)
-				}
-			}
+	for _, item := range prepared {
+		s := item.skill
+		skillDirName := item.name
+		skillDir := filepath.Join(skillsDir, skillDirName)
+		if err := os.MkdirAll(skillDir, 0o755); err != nil {
+			return warnings, fmt.Errorf("failed to create skill directory %s: %w", skillDir, err)
 		}
 
-		if err := reconcileSkills(portDir, expected); err != nil {
-			return fmt.Errorf("reconciliation failed for %s: %w", target, err)
+		if err := writeSkillFiles(skillDir, skillDirName, s); err != nil {
+			if opts.FailOnSkillError {
+				return warnings, err
+			}
+			warnings = append(warnings, fmt.Sprintf("skipped skill %s: %v", s.Identifier, err))
+			delete(expected, skillDirName)
+			_ = os.RemoveAll(skillDir)
+		}
+	}
+
+	if err := reconcileSkills(skillsDir, previousManifest, expected); err != nil {
+		return warnings, fmt.Errorf("reconciliation failed for %s: %w", skillsDir, err)
+	}
+	if err := removeLegacyPortSkillsDir(skillsDir); err != nil {
+		return warnings, err
+	}
+	if err := writePortSkillsManifest(skillsDir, manifest); err != nil {
+		return warnings, err
+	}
+	return warnings, nil
+}
+
+func prepareSkillsForWrite(skills []Skill, opts WriteSkillsOptions) ([]preparedSkill, map[string]bool, []string, error) {
+	var warnings []string
+	skipped := make(map[string]bool)
+	byName := make(map[string][]Skill)
+	for _, s := range skills {
+		if !hasSkillMD(s.Files) {
+			if err := handleSkillWriteError(s.Identifier, fmt.Errorf("skill %s has no SKILL.md in catalog files", s.Identifier), opts, &warnings, skipped); err != nil {
+				return nil, skipped, warnings, err
+			}
+			continue
+		}
+		name, err := skillDirName(s)
+		if err != nil {
+			if err := handleSkillWriteError(s.Identifier, err, opts, &warnings, skipped); err != nil {
+				return nil, skipped, warnings, err
+			}
+			continue
+		}
+		byName[name] = append(byName[name], s)
+	}
+
+	prepared := make([]preparedSkill, 0, len(skills))
+	for name, namedSkills := range byName {
+		if len(namedSkills) > 1 {
+			err := fmt.Errorf("multiple skills resolve to local skill name %q", name)
+			for _, s := range namedSkills {
+				if handleErr := handleSkillWriteError(s.Identifier, err, opts, &warnings, skipped); handleErr != nil {
+					return nil, skipped, warnings, handleErr
+				}
+			}
+			continue
+		}
+		prepared = append(prepared, preparedSkill{skill: namedSkills[0], name: name})
+	}
+	return prepared, skipped, warnings, nil
+}
+
+func handleSkillWriteError(identifier string, err error, opts WriteSkillsOptions, warnings *[]string, skipped map[string]bool) error {
+	if opts.FailOnSkillError {
+		return err
+	}
+	skipped[identifier] = true
+	*warnings = append(*warnings, fmt.Sprintf("skipped skill %s: %v", identifier, err))
+	return nil
+}
+
+func findSkillMDFile(files []SkillFile) (SkillFile, bool) {
+	for _, file := range files {
+		path := filepath.ToSlash(filepath.Clean(filepath.FromSlash(file.Path)))
+		if path == "SKILL.md" || filepath.Base(path) == "SKILL.md" {
+			return file, true
+		}
+	}
+	return SkillFile{}, false
+}
+
+func hasSkillMD(files []SkillFile) bool {
+	_, ok := findSkillMDFile(files)
+	return ok
+}
+
+func reconcileSkills(skillsDir string, previousManifest portSkillsManifest, expected map[string]bool) error {
+	cleanSkillsDir := filepath.Clean(skillsDir) + string(filepath.Separator)
+	for _, entry := range previousManifest.Skills {
+		skillName := entry.Name
+		if !isSafeDirName(skillName) {
+			continue
+		}
+		cleanSkillPath := filepath.Clean(filepath.Join(skillsDir, skillName))
+		if !strings.HasPrefix(cleanSkillPath+string(filepath.Separator), cleanSkillsDir) {
+			continue
+		}
+		if !expected[skillName] {
+			if err := os.RemoveAll(cleanSkillPath); err != nil {
+				return fmt.Errorf("failed to remove stale skill %s: %w", skillName, err)
+			}
 		}
 	}
 	return nil
 }
 
-func reconcileSkills(portDir string, expected map[skillKey]bool) error {
-	groupEntries, err := os.ReadDir(portDir)
+func readPortSkillsManifest(skillsDir string) (portSkillsManifest, error) {
+	path := filepath.Join(skillsDir, portSkillsManifestFile)
+	content, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil
+			return portSkillsManifest{}, nil
 		}
-		return err
+		return portSkillsManifest{}, fmt.Errorf("failed to read skills manifest %s: %w", path, err)
 	}
+	var manifest portSkillsManifest
+	if err := json.Unmarshal(content, &manifest); err != nil {
+		return portSkillsManifest{}, fmt.Errorf("failed to parse skills manifest %s: %w", path, err)
+	}
+	return manifest, nil
+}
 
-	cleanPortDir := filepath.Clean(portDir) + string(filepath.Separator)
-
-	for _, groupEntry := range groupEntries {
-		if !groupEntry.IsDir() {
-			continue
-		}
-		groupName := groupEntry.Name()
-		if !isSafeDirName(groupName) {
-			continue
-		}
-		cleanGroupPath := filepath.Clean(filepath.Join(portDir, groupName))
-		if !strings.HasPrefix(cleanGroupPath+string(filepath.Separator), cleanPortDir) {
-			continue
-		}
-
-		skillEntries, err := os.ReadDir(cleanGroupPath)
-		if err != nil {
-			continue
-		}
-
-		for _, skillEntry := range skillEntries {
-			if !skillEntry.IsDir() {
-				continue
-			}
-			skillName := skillEntry.Name()
-			if !isSafeDirName(skillName) {
-				continue
-			}
-			cleanSkillPath := filepath.Clean(filepath.Join(cleanGroupPath, skillName))
-			if !strings.HasPrefix(cleanSkillPath+string(filepath.Separator), cleanGroupPath+string(filepath.Separator)) {
-				continue
-			}
-			key := skillKey{groupName, skillName}
-			if !expected[key] {
-				if err := os.RemoveAll(cleanSkillPath); err != nil {
-					return fmt.Errorf("failed to remove stale skill %s/%s: %w", groupName, skillName, err)
-				}
-			}
-		}
-
-		remaining, _ := os.ReadDir(cleanGroupPath)
-		if len(remaining) == 0 {
-			_ = os.Remove(cleanGroupPath)
-		}
+func writePortSkillsManifest(skillsDir string, manifest portSkillsManifest) error {
+	if err := os.MkdirAll(skillsDir, 0o755); err != nil {
+		return fmt.Errorf("failed to create skills directory %s: %w", skillsDir, err)
+	}
+	content, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to encode skills manifest: %w", err)
+	}
+	content = append(content, '\n')
+	path := filepath.Join(skillsDir, portSkillsManifestFile)
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		return fmt.Errorf("failed to write skills manifest %s: %w", path, err)
 	}
 	return nil
+}
+
+func removeLegacyPortSkillsDir(skillsDir string) error {
+	legacyDir := filepath.Join(skillsDir, PortSkillsDir)
+	if _, err := os.Stat(legacyDir); os.IsNotExist(err) {
+		return nil
+	}
+	if err := os.RemoveAll(legacyDir); err != nil {
+		return fmt.Errorf("failed to remove legacy skills directory %s: %w", legacyDir, err)
+	}
+	return nil
+}
+
+func clearPortManagedSkillsDir(skillsDir string) (bool, error) {
+	removed := false
+	manifest, err := readPortSkillsManifest(skillsDir)
+	if err != nil {
+		return false, err
+	}
+	cleanSkillsDir := filepath.Clean(skillsDir) + string(filepath.Separator)
+	for _, entry := range manifest.Skills {
+		if !isSafeDirName(entry.Name) {
+			continue
+		}
+		skillDir := filepath.Clean(filepath.Join(skillsDir, entry.Name))
+		if !strings.HasPrefix(skillDir+string(filepath.Separator), cleanSkillsDir) {
+			continue
+		}
+		if _, err := os.Stat(skillDir); err == nil {
+			if err := os.RemoveAll(skillDir); err != nil {
+				return removed, err
+			}
+			removed = true
+		}
+	}
+	manifestPath := filepath.Join(skillsDir, portSkillsManifestFile)
+	if _, err := os.Stat(manifestPath); err == nil {
+		if err := os.Remove(manifestPath); err != nil {
+			return removed, err
+		}
+		removed = true
+	}
+	legacyDir := filepath.Join(skillsDir, PortSkillsDir)
+	if _, err := os.Stat(legacyDir); err == nil {
+		if err := os.RemoveAll(legacyDir); err != nil {
+			return removed, err
+		}
+		removed = true
+	}
+	return removed, nil
 }
 
 // isSafeDirName returns true if name is a plain directory basename with no path
@@ -422,6 +479,28 @@ func reconcileSkills(portDir string, expected map[skillKey]bool) error {
 // sourced from os.ReadDir are used in subsequent file operations.
 func isSafeDirName(name string) bool {
 	return name != "." && name != ".." && !strings.ContainsAny(name, "/\\")
+}
+
+func writeSkillFiles(skillDir, skillDirName string, s Skill) error {
+	hasSkillMD := false
+	for _, f := range filterOrphanSkillFiles(s, s.Files) {
+		relPath, err := normalizeSkillFilePath(f.Path, skillDirName, s)
+		if err != nil {
+			return fmt.Errorf("failed to write file %s for skill %s: %w", f.Path, s.Identifier, err)
+		}
+		file := f
+		if relPath == "SKILL.md" {
+			hasSkillMD = true
+			file.Content = normalizeSkillMDContent(s, skillDirName, f.Content)
+		}
+		if err := writeSkillFile(skillDir, SkillFile{Path: relPath, Content: file.Content}); err != nil {
+			return fmt.Errorf("failed to write file %s for skill %s: %w", f.Path, s.Identifier, err)
+		}
+	}
+	if !hasSkillMD {
+		return fmt.Errorf("skill %s has no SKILL.md in catalog files", s.Identifier)
+	}
+	return nil
 }
 
 func writeSkillFile(skillDir string, f SkillFile) error {
@@ -437,49 +516,256 @@ func writeSkillFile(skillDir string, f SkillFile) error {
 	return os.WriteFile(dest, []byte(f.Content), 0o644)
 }
 
-func validatePathComponent(name string) error {
-	if name == "." || name == ".." || strings.ContainsAny(name, "/\\") {
-		return fmt.Errorf("contains invalid path characters")
+func normalizeSkillFilePath(path, skillDirName string, s Skill) (string, error) {
+	path = filepath.ToSlash(filepath.Clean(filepath.FromSlash(path)))
+	if path == "." || path == "" || strings.HasPrefix(path, "../") || strings.HasPrefix(path, "/") {
+		return "", fmt.Errorf("skill file path %q escapes skill directory", path)
 	}
-	return nil
-}
 
-func buildSkillMD(s Skill) string {
-	var sb strings.Builder
-	sb.WriteString("---\n")
-	sb.WriteString(fmt.Sprintf("name: %s\n", s.Identifier))
-	if s.Description != "" {
-		sb.WriteString(fmt.Sprintf("description: %s\n", s.Description))
-	}
-	sb.WriteString("---\n\n")
-
-	if s.Instructions != "" {
-		sb.WriteString(s.Instructions)
-		if !strings.HasSuffix(s.Instructions, "\n") {
-			sb.WriteString("\n")
+	parts := strings.Split(path, "/")
+	if skillsParts, ok := pathPartsAfterSkillsDir(path); ok {
+		trimmedParts, found := trimToSkillDir(skillsParts, skillDirName, s)
+		if !found {
+			return "", fmt.Errorf("skill file path %q is not inside a skill directory", path)
 		}
-	} else {
-		sb.WriteString(fmt.Sprintf("# %s\n\n_No instructions provided._\n", s.Title))
+		parts = trimmedParts
 	}
-
-	return sb.String()
+	if len(parts) == 0 {
+		return "", fmt.Errorf("skill file path %q escapes skill directory", path)
+	}
+	return strings.Join(parts, "/"), nil
 }
 
-func stringProp(m map[string]interface{}, key string) string {
-	if v, ok := m[key].(string); ok {
-		return v
+func pathPartsAfterSkillsDir(path string) ([]string, bool) {
+	path = filepath.ToSlash(filepath.Clean(filepath.FromSlash(path)))
+	parts := strings.Split(path, "/")
+	for i := 0; i < len(parts); i++ {
+		if parts[i] == "skills" {
+			return parts[i+1:], true
+		}
 	}
-	return ""
+	return nil, false
 }
 
-func stringFromMap(m map[string]interface{}, key string) string {
-	if m == nil {
+func trimToSkillDir(parts []string, skillDirName string, s Skill) ([]string, bool) {
+	for i := 0; i < len(parts); i++ {
+		if isSkillDirPart(parts[i], skillDirName, s) && i+1 < len(parts) {
+			return parts[i+1:], true
+		}
+	}
+	return nil, false
+}
+
+func isSkillDirPart(part, skillDirName string, s Skill) bool {
+	return part == skillDirName || part == s.Title || part == skillIdentifierBase(s.Identifier)
+}
+
+func skillIdentifierBase(identifier string) string {
+	identifier = strings.Trim(identifier, "/\\")
+	if identifier == "" {
 		return ""
 	}
-	if v, ok := m[key].(string); ok {
-		return v
+	return filepath.Base(filepath.ToSlash(identifier))
+}
+
+func skillDirName(s Skill) (string, error) {
+	content := skillMDContent(s.Files)
+	if name := frontmatterSkillName(content); name != "" {
+		if err := validateAgentSkillName(name); err != nil {
+			return "", fmt.Errorf("invalid skill directory name for %q: %w", s.Identifier, err)
+		}
+		return name, nil
+	}
+	if s.AgentSkillName != "" {
+		if err := validateAgentSkillName(s.AgentSkillName); err != nil {
+			return "", fmt.Errorf("invalid skill directory name for %q: %w", s.Identifier, err)
+		}
+		return s.AgentSkillName, nil
+	}
+	name, err := agentSkillNameFromIdentifier(s.Identifier)
+	if err != nil {
+		return "", fmt.Errorf("invalid skill directory name for %q: %w", s.Identifier, err)
+	}
+	return name, nil
+}
+
+func skillMDContent(files []SkillFile) string {
+	file, _ := findSkillMDFile(files)
+	return file.Content
+}
+
+func normalizeSkillMDContent(s Skill, skillName, content string) string {
+	description := strings.TrimSpace(s.Description)
+	if description == "" {
+		description = frontmatterDescription(content)
+	}
+	if description == "" {
+		description = fmt.Sprintf("Port skill %s.", skillName)
+	}
+	return upsertSkillMDFrontmatter(content, skillName, description)
+}
+
+func upsertSkillMDFrontmatter(content, skillName, description string) string {
+	content = strings.TrimPrefix(content, "\ufeff")
+	content = strings.ReplaceAll(content, "\r\n", "\n")
+	lines := []string{
+		fmt.Sprintf("name: %s", skillName),
+		fmt.Sprintf("description: %s", sanitizeFrontmatterScalar(description)),
+	}
+	if span, ok := findAgentSkillFrontmatter(content); ok {
+		return rewriteFrontmatterSpan(content, span, lines)
+	}
+	if span, ok := findLeadingFrontmatter(content); ok {
+		return rewriteFrontmatterSpan(content, span, lines)
+	}
+	return "---\n" + strings.Join(lines, "\n") + "\n---\n\n" + content
+}
+
+func rewriteFrontmatterSpan(content string, span agentSkillFrontmatterSpan, lines []string) string {
+	for _, line := range strings.Split(span.inner, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "name:") || strings.HasPrefix(trimmed, "description:") {
+			continue
+		}
+		lines = append(lines, line)
+	}
+	suffix := stripLeadingAgentSkillFrontmatter(content[span.fenceEnd:])
+	return content[:span.openStart] + "---\n" + strings.Join(lines, "\n") + "\n---" + suffix
+}
+
+type agentSkillFrontmatterSpan struct {
+	openStart int
+	fenceEnd  int
+	inner     string
+}
+
+// findAgentSkillFrontmatter locates the first --- block that looks like a real
+// Agent Skills header (valid name + description), matching frontmatterSkillName.
+func findAgentSkillFrontmatter(content string) (agentSkillFrontmatterSpan, bool) {
+	content = strings.ReplaceAll(content, "\r\n", "\n")
+	for _, match := range skillFrontmatterPattern.FindAllStringSubmatchIndex(content, -1) {
+		span, ok := spanFromFrontmatterMatch(content, match)
+		if !ok {
+			continue
+		}
+		if !skillFrontmatterDescriptionPattern.MatchString(span.inner) {
+			continue
+		}
+		if agentSkillNameFromFrontmatterInner(span.inner) == "" {
+			continue
+		}
+		return span, true
+	}
+	return agentSkillFrontmatterSpan{}, false
+}
+
+// findLeadingFrontmatter locates a leading --- block even when it is incomplete
+// (e.g. name without description), preserving the previous HasPrefix("---\n")
+// update path so we rewrite in place instead of prepending a second header.
+func findLeadingFrontmatter(content string) (agentSkillFrontmatterSpan, bool) {
+	content = strings.ReplaceAll(content, "\r\n", "\n")
+	if !strings.HasPrefix(content, "---") {
+		return agentSkillFrontmatterSpan{}, false
+	}
+	match := skillFrontmatterPattern.FindStringSubmatchIndex(content)
+	if len(match) < 4 || match[0] != 0 {
+		return agentSkillFrontmatterSpan{}, false
+	}
+	return spanFromFrontmatterMatch(content, match)
+}
+
+func spanFromFrontmatterMatch(content string, match []int) (agentSkillFrontmatterSpan, bool) {
+	if len(match) < 4 || match[2] < 0 || match[3] < 0 {
+		return agentSkillFrontmatterSpan{}, false
+	}
+	openStart := match[0]
+	if openStart < len(content) && content[openStart] == '\n' {
+		openStart++
+	}
+	fenceEnd := match[3] + 1 // skip the \n before closing ---
+	if fenceEnd+3 > len(content) || content[fenceEnd:fenceEnd+3] != "---" {
+		return agentSkillFrontmatterSpan{}, false
+	}
+	fenceEnd += 3
+	for fenceEnd < len(content) && (content[fenceEnd] == ' ' || content[fenceEnd] == '\t') {
+		fenceEnd++
+	}
+	return agentSkillFrontmatterSpan{
+		openStart: openStart,
+		fenceEnd:  fenceEnd,
+		inner:     content[match[2]:match[3]],
+	}, true
+}
+
+// stripLeadingAgentSkillFrontmatter removes a second Agent Skills frontmatter
+// block at the start of body (after optional blank lines), healing content that
+// was previously corrupted by a blind prepend.
+func stripLeadingAgentSkillFrontmatter(body string) string {
+	trimmed := strings.TrimLeft(body, "\n")
+	span, ok := findAgentSkillFrontmatter(trimmed)
+	if !ok || span.openStart != 0 {
+		return body
+	}
+	rest := trimmed[span.fenceEnd:]
+	if rest == "" {
+		return "\n"
+	}
+	if strings.HasPrefix(rest, "\n") {
+		return rest
+	}
+	return "\n" + rest
+}
+
+func agentSkillNameFromFrontmatterInner(inner string) string {
+	nameMatch := skillFrontmatterNamePattern.FindStringSubmatch(inner)
+	if len(nameMatch) < 4 {
+		return ""
+	}
+	for _, value := range nameMatch[1:] {
+		name := strings.TrimSpace(value)
+		if name == "" {
+			continue
+		}
+		if validateAgentSkillName(name) == nil {
+			return name
+		}
 	}
 	return ""
+}
+
+// frontmatterDescription extracts the description field using the same
+// anywhere-in-content block scanning as frontmatterSkillName, so a fallback
+// description is found even when the real Agent Skills header isn't the
+// leading block (e.g. preceded by an unrelated "---" delimited section).
+func frontmatterDescription(content string) string {
+	content = strings.ReplaceAll(content, "\r\n", "\n")
+	for _, frontmatterMatch := range skillFrontmatterPattern.FindAllStringSubmatch(content, -1) {
+		if len(frontmatterMatch) < 2 {
+			continue
+		}
+		valueMatch := skillFrontmatterDescriptionValuePattern.FindStringSubmatch(frontmatterMatch[1])
+		if len(valueMatch) < 4 {
+			continue
+		}
+		for _, value := range valueMatch[1:] {
+			if trimmed := strings.TrimSpace(value); trimmed != "" {
+				return trimmed
+			}
+		}
+	}
+	return ""
+}
+
+func frontmatterSkillName(content string) string {
+	content = strings.ReplaceAll(content, "\r\n", "\n")
+	if span, ok := findAgentSkillFrontmatter(content); ok {
+		return agentSkillNameFromFrontmatterInner(span.inner)
+	}
+	return ""
+}
+
+func sanitizeFrontmatterScalar(value string) string {
+	return strings.Join(strings.Fields(value), " ")
 }
 
 func toSet(slice []string) map[string]bool {
@@ -492,10 +778,74 @@ func toSet(slice []string) map[string]bool {
 
 func expandHome(path string) string {
 	if strings.HasPrefix(path, "~/") {
-		home, err := os.UserHomeDir()
-		if err == nil {
+		if home := userHomeDir(); home != "" {
 			return filepath.Join(home, path[2:])
 		}
 	}
 	return path
+}
+
+func collectPortSkillDirs(globalTargets, projectDirs []string) []string {
+	seen := make(map[string]bool)
+	var dirs []string
+	add := func(targets []string) {
+		for _, target := range targets {
+			skillsDir := skillsDirForTarget(target)
+			if !seen[skillsDir] {
+				seen[skillsDir] = true
+				dirs = append(dirs, skillsDir)
+			}
+		}
+	}
+	add(globalTargets)
+	if len(projectDirs) > 0 {
+		add(buildProjectTargets(globalTargets, projectDirs))
+	}
+	return dirs
+}
+
+// UnloadSkillFromTargets removes local Port-managed copies of a skill for every target.
+func UnloadSkillFromTargets(identifier string, globalTargets, projectDirs []string) error {
+	for _, portDir := range collectPortSkillDirs(globalTargets, projectDirs) {
+		if err := removeSkillFromDir(portDir, identifier); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func removeSkillFromDir(skillsDir, identifier string) error {
+	manifestPath := filepath.Join(skillsDir, portSkillsManifestFile)
+	if _, err := os.Stat(manifestPath); os.IsNotExist(err) {
+		return nil
+	}
+	manifest, err := readPortSkillsManifest(skillsDir)
+	if err != nil {
+		return err
+	}
+	cleanSkillsDir := filepath.Clean(skillsDir) + string(filepath.Separator)
+	updated := portSkillsManifest{Skills: make([]portSkillsManifestEntry, 0, len(manifest.Skills))}
+	for _, entry := range manifest.Skills {
+		if entry.Identifier != identifier {
+			updated.Skills = append(updated.Skills, entry)
+			continue
+		}
+		if !isSafeDirName(entry.Name) {
+			continue
+		}
+		skillPath := filepath.Clean(filepath.Join(skillsDir, entry.Name))
+		if !strings.HasPrefix(skillPath+string(filepath.Separator), cleanSkillsDir) {
+			continue
+		}
+		if err := os.RemoveAll(skillPath); err != nil {
+			return fmt.Errorf("failed to remove skill %s: %w", skillPath, err)
+		}
+	}
+	if len(updated.Skills) == 0 {
+		if err := os.Remove(manifestPath); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		return nil
+	}
+	return writePortSkillsManifest(skillsDir, updated)
 }

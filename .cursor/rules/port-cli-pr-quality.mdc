@@ -1,0 +1,52 @@
+---
+description: PR quality patterns learned from port-cli review feedback
+alwaysApply: true
+---
+
+# Port CLI PR Quality Checklist
+
+## migrate.go must mirror import.go protections
+
+When modifying blueprint import phases in `import.go`, always check whether `migrate.go` needs the same change. The migrate module has its own `importToTarget` that duplicates the phased approach. Key parity requirements:
+
+- aggregationProperties: use `TopologicalSortAggProps` for ordering
+- ownership: use `TopologicalSortOwnership` for ordering
+- mirrorProperties: retry after aggProps phase
+- aggregationProperties: retry after all other phases
+- Both modules must handle failures identically (collect + retry, not just log)
+
+## --include flag validation
+
+When adding a new resource type that depends on another (e.g. `page-permissions` depends on `pages`), validate the dependency in ALL four commands: export, import, migrate, compare. A bare `--include page-permissions` without `pages` causes silent empty exports or idempotency-breaking overwrites.
+
+## Regex patterns must handle multi-line API responses
+
+Port API error bodies can span multiple lines. Always use `(?s)` flag in regexes that extract JSON from error strings (e.g. `invalidPermBodyPattern`).
+
+## Migrate command output parity
+
+When adding new result counters (e.g. `BlueprintPermissionsUpdated`), ensure they appear in:
+- The `Result` struct
+- CLI text output
+- CLI JSON output (`--output json`)
+- Both "Errors:" and "Warnings:" sections use the correct label
+
+## Test patterns (Eric's style)
+
+- Every new feature needs both positive (success) and negative (failure) tests
+- Use `httptest.NewServer` with closure variables to capture requests
+- Use `t.Fatalf` for setup failures, `t.Errorf` for assertion failures
+- Never silently skip — use `t.Fatal` instead of returning early on nil
+- For retry logic: test success-on-retry AND failure-on-retry (error reported)
+
+## CHANGELOG entries
+
+Describe features and fixes, not test names. Write from the user's perspective:
+
+```
+# Bad
+- TestCollector_CollectsPagePermissions: verify page permissions collected
+
+# Good
+- aggregationProperties are now applied in topological order during migrate
+```

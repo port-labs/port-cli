@@ -1,129 +1,719 @@
 package commands
 
 import (
-	"context"
 	"fmt"
 	"os"
-	"strings"
 
-	"charm.land/huh/v2"
 	"charm.land/lipgloss/v2"
-	"github.com/port-experimental/port-cli/internal/config"
-	"github.com/port-experimental/port-cli/internal/modules/skills"
-	"github.com/port-experimental/port-cli/internal/styles"
+	"github.com/port-labs/port-cli/internal/config"
+	"github.com/port-labs/port-cli/internal/modules/skills"
+	"github.com/port-labs/port-cli/internal/styles"
 	"github.com/spf13/cobra"
 )
 
 // RegisterSkills registers the skills command group.
 func RegisterSkills(rootCmd *cobra.Command) {
+	var skillsOrg string
+
 	skillsCmd := &cobra.Command{
 		Use:   "skills",
-		Short: "Manage Port AI skills: hooks and local skill sync",
-		Long: `Manage Port AI skills: hooks and local skill sync.
-
-Use 'port skills init' to install session-start hooks into your AI tools
-(Cursor, Claude Code, Gemini CLI, OpenAI Codex, Windsurf, GitHub Copilot).
-Once installed, every new AI session will automatically sync your selected skills
-from Port.`,
+		Short: "Manage Port AI skills: sync, selection, and publishing",
 	}
+	configureSkillsCommandGroups(skillsCmd)
+	skillsCmd.PersistentFlags().StringVar(&skillsOrg, "org", "", "Organization name (uses default from config if not specified)")
 
-	skillsCmd.AddCommand(registerSkillsInit())
-	skillsCmd.AddCommand(registerSkillsSync())
-	skillsCmd.AddCommand(registerSkillsList())
-	skillsCmd.AddCommand(registerSkillsClear())
-	skillsCmd.AddCommand(registerSkillsStatus())
+	skillsCmd.AddCommand(
+		withSkillsGroup(registerSkillsInit(), skillsGroupSetup),
+		withSkillsGroup(registerSkillsStatus(), skillsGroupSetup),
+		withSkillsGroup(registerSkillsSelect(), skillsGroupSelection),
+		withSkillsGroup(registerSkillsAdd(), skillsGroupSelection),
+		withSkillsGroup(registerSkillsRemove(), skillsGroupSelection),
+		withSkillsGroup(registerSkillsSync(), skillsGroupSelection),
+		withSkillsGroup(registerSkillsList(), skillsGroupRemote),
+		withSkillsGroup(registerSkillsSearch(), skillsGroupRemote),
+		withSkillsGroup(registerSkillsUpload(), skillsGroupRemote),
+		withSkillsGroup(registerSkillsPublish(), skillsGroupRemote),
+		withSkillsGroup(registerSkillsUnpublish(), skillsGroupRemote),
+		withSkillsGroup(registerSkillsClear(), skillsGroupLocal),
+	)
 
 	rootCmd.AddCommand(skillsCmd)
 }
 
 func registerSkillsInit() *cobra.Command {
-	return &cobra.Command{
-		Use:   "init",
-		Short: "Install AI session-start hooks and sync skills from Port",
-		Long: `Install AI session-start hooks for Cursor, Claude Code, Gemini CLI, OpenAI Codex, Windsurf, and GitHub Copilot.
+	var (
+		tools              []string
+		installHooks       bool
+		groups             []string
+		skillsIDs          []string
+		selectAllGroups    bool
+		selectAllUngrouped bool
+	)
 
-On every new AI session the hook will run 'port skills sync',
-keeping your local skills in sync with the Port registry. Hooks are installed
-globally in your home directory. GitHub Copilot uses ~/.copilot for personal
-skills and <repo>/.github for project skills.
-Skills are written to the correct location based on each skill's 'location'
-property in Port ("global" → AI tool directories, "project" → tool directory
-inside the current repository).`,
+	cmd := &cobra.Command{
+		Use:   "init",
+		Short: "First-time setup: pick AI tools and choose skills",
+		Long: `First-time setup for Port skills on this machine.
+
+Choose which AI tools receive synced skills and save that configuration.
+
+Supported tools include Agents (cross-platform), Cursor, Claude Code, Gemini CLI,
+OpenAI Codex, Windsurf, and GitHub Copilot. Skills go under each tool's skills/
+tree (and ~/.agents / <project>/.agents for Agents per agentskills.io).
+
+By default init does not modify hooks.json or settings.json. Pass --install-hooks
+to merge a session-start hook that runs 'port skills sync --quiet --org <org>' into
+each selected tool (global home dirs for most tools; GitHub Copilot is repo-scoped
+under <repo>/.github — run init from the repository root). The org is the one
+resolved for this init (--org flag or default_org), so later default_org changes
+do not redirect hook syncs.
+
+Skills are placed based on each skill's Port 'location' property ("global" → tool
+directories, "project" → tool directory inside each registered project directory).
+
+Scripts and CI: pass explicit flags (--tool, --group, --skill, …) or -y/--yes to
+select every option (all tools, groups, and ungrouped skills) without prompts.
+Run 'port skills sync' afterwards to write skills to disk.
+
+Examples:
+  port skills init
+  port skills init -y
+  port skills init --tool Cursor --select-all-groups --select-all-ungrouped
+  port skills init --tool "Agents (cross-platform)" --tool Cursor --tool "Claude Code"
+  port skills init --tool Cursor --tool "Gemini CLI" --tool Windsurf --install-hooks`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			flags := GetGlobalFlags(ctx)
 			configManager := config.NewConfigManager(flags.ConfigFile)
+			org := skillsOrgName(cmd)
 
-			targets, err := promptTargetSelection(configManager)
-			if err != nil {
-				return err
-			}
+			explicitTools := cmd.Flags().Changed("tool")
+			explicitSelection := skillsSelectionNonInteractive(cmd, selectAllGroups, selectAllUngrouped)
+			acceptAll := skillsAcceptAll(cmd)
+			usePrompts := skillsUseInteractivePrompts(cmd) && !explicitTools && !explicitSelection
 
-			mod, configManager, err := newSkillsModuleWithFlags(ctx, flags)
-			if err != nil {
-				return err
-			}
-
-			initResult, err := mod.Init(ctx, skills.InitOptions{
-				Targets: targets,
-			})
-			if err != nil {
-				return fmt.Errorf("failed to install hooks: %w", err)
-			}
-
-			for _, t := range initResult.InstalledTargets {
-				lipgloss.Printf("%s Hook installed in %s\n", styles.CheckMark, styles.Bold.Render(t))
-			}
-
-			loadOpts, err := buildLoadSkillsOpts(ctx, mod, true)
-			if err != nil {
-				return err
-			}
-
-			if clearResult, err := mod.ClearSkills(); err != nil {
-				return fmt.Errorf("failed to clear existing skills: %w", err)
-			} else {
-				for _, t := range clearResult.DeletedTargets {
-					lipgloss.Printf("%s Cleared existing skills from %s\n", styles.CheckMark, styles.Bold.Render(t))
+			var targets []skills.HookTarget
+			switch {
+			case usePrompts:
+				var err error
+				targets, err = promptTargetSelection(configManager)
+				if err != nil {
+					return err
 				}
+			case explicitTools:
+				resolved, err := resolveTargetsByName(tools)
+				if err != nil {
+					return err
+				}
+				targets = resolved
+			case acceptAll:
+				targets = skills.DefaultHookTargets()
+			default:
+				return fmt.Errorf("non-interactive init requires %s", skillsNonInteractiveHint)
 			}
 
-			result, err := mod.LoadSkills(ctx, loadOpts)
+			mod, configManager, err := newSkillsModuleWithFlags(ctx, flags, org)
 			if err != nil {
-				return fmt.Errorf("failed to sync skills: %w", err)
+				return err
 			}
-			printLoadResult(result)
+
+			if installHooks {
+				initResult, err := mod.Init(ctx, skills.InitOptions{Targets: targets})
+				if err != nil {
+					return fmt.Errorf("failed to install hooks: %w", err)
+				}
+				for _, t := range initResult.InstalledTargets {
+					lipgloss.Printf("%s Hook installed in %s\n", styles.CheckMark, styles.Bold.Render(t))
+				}
+			} else if err := mod.RegisterTargets(ctx, targets); err != nil {
+				return fmt.Errorf("failed to save tool targets: %w", err)
+			}
+
+			var rawFetched *skills.FetchedSkills
+			var loadOpts skills.LoadSkillsOptions
+			switch {
+			case usePrompts:
+				loadOpts, rawFetched, err = buildLoadSkillsOpts(ctx, mod, configManager, true)
+				if err != nil {
+					return err
+				}
+			case explicitSelection:
+				loadOpts, rawFetched, err = buildNonInteractiveSelectLoadOpts(ctx, mod, configManager, groups, skillsIDs, selectAllGroups, selectAllUngrouped)
+				if err != nil {
+					return err
+				}
+			case acceptAll:
+				loadOpts, rawFetched, err = buildLoadSkillsOptsAllSelected(ctx, mod)
+				if err != nil {
+					return err
+				}
+			default:
+				return fmt.Errorf("non-interactive init requires selection flags or -y")
+			}
+			loadOpts.Fetched = rawFetched
+
+			if err := mod.ConfigureSelection(loadOpts); err != nil {
+				return err
+			}
+			lipgloss.Printf("%s Skills configuration initialized. Run %s to sync skills.\n", styles.CheckMark, styles.Bold.Render("port skills sync"))
 			return nil
 		},
 	}
+
+	cmd.Flags().StringArrayVar(&tools, "tool", nil, "AI tool name to configure (repeatable, e.g. \"Cursor\")")
+	cmd.Flags().BoolVar(&installHooks, "install-hooks", false, "Write session-start hooks (hooks.json / settings.json) for selected tools")
+	cmd.Flags().StringArrayVar(&groups, "group", nil, "Skill group identifier to sync (repeatable)")
+	cmd.Flags().StringArrayVar(&skillsIDs, "skill", nil, "Skill identifier to sync (repeatable)")
+	cmd.Flags().BoolVar(&selectAllGroups, "select-all-groups", false, "Sync all skill groups")
+	cmd.Flags().BoolVar(&selectAllUngrouped, "select-all-ungrouped", false, "Sync all ungrouped skills")
+	return cmd
 }
 
-func registerSkillsSync() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "sync",
-		Short: "Fetch skills from Port and sync them to local AI tool directories",
-		Long: `Fetch skills from Port and sync them to the appropriate directories.
+func registerSkillsSelect() *cobra.Command {
+	var (
+		groups             []string
+		skillsIDs          []string
+		selectAllGroups    bool
+		selectAllUngrouped bool
+	)
 
-Uses the selection configured during 'port skills init'. Skills with
-location="global" are written to your AI tool directories; skills with
-location="project" are written to the current working directory.
-Required skills are always included. Skills removed from Port are deleted
-locally. Run 'port skills init' to change your selection.`,
+	cmd := &cobra.Command{
+		Use:   "select",
+		Short: "Replace your full skill/group selection and re-sync",
+		Long: `Replace the entire skill and group selection saved in ~/.port/config.yaml.
+
+Re-runs the selection flow from 'port skills init' without reinstalling hooks.
+Clears previously synced skills from disk, then syncs the new selection.
+
+Use 'port skills add' or 'port skills remove' for incremental changes instead.
+
+Interactive: run in a terminal to pick groups and ungrouped skills.
+
+Non-interactive: pass --group, --skill, --select-all-groups, and/or
+--select-all-ungrouped (same flags as 'port skills init').`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			flags := GetGlobalFlags(ctx)
 
-			mod, configManager, err := newSkillsModuleWithFlags(ctx, flags)
+			mod, configManager, err := newSkillsModuleWithFlags(ctx, flags, skillsOrgName(cmd))
 			if err != nil {
 				return err
 			}
 
 			skillsCfg, err := configManager.LoadSkillsConfig()
-			if err != nil || !skillsCfg.HasSelection() {
-				return fmt.Errorf("no skill selection configured — run 'port skills init' first")
+			if err != nil || len(skillsCfg.Targets) == 0 {
+				return fmt.Errorf("no skills configuration found — run 'port skills init' first")
 			}
 
-			result, err := mod.LoadSkills(ctx, skills.LoadSkillsOptions{})
+			nonInteractive := skillsSelectionNonInteractive(cmd, selectAllGroups, selectAllUngrouped)
+			if !nonInteractive {
+				if err := RequireInteractive(); err != nil {
+					return err
+				}
+			}
+
+			var rawFetched *skills.FetchedSkills
+			loadOpts := skills.LoadSkillsOptions{}
+			if nonInteractive {
+				loadOpts, rawFetched, err = buildNonInteractiveSelectLoadOpts(ctx, mod, configManager, groups, skillsIDs, selectAllGroups, selectAllUngrouped)
+				if err != nil {
+					return err
+				}
+			}
+			loadOpts.Fetched = rawFetched
+
+			return runSkillsSelect(cmd, mod, configManager, !nonInteractive, loadOpts)
+		},
+	}
+
+	cmd.Flags().StringArrayVar(&groups, "group", nil, "Skill group identifier to sync (repeatable)")
+	cmd.Flags().StringArrayVar(&skillsIDs, "skill", nil, "Ungrouped skill identifier to sync (repeatable)")
+	cmd.Flags().BoolVar(&selectAllGroups, "select-all-groups", false, "Sync all skill groups")
+	cmd.Flags().BoolVar(&selectAllUngrouped, "select-all-ungrouped", false, "Sync all ungrouped skills")
+	return cmd
+}
+
+func registerSkillsAdd() *cobra.Command {
+	var (
+		groups    []string
+		skillsIDs []string
+		tools     []string
+	)
+
+	cmd := &cobra.Command{
+		Use:   "add [skill-identifier...]",
+		Short: "Add groups, skills, or AI tools to your saved selection",
+		Long: `Incrementally extend what you sync — without redoing 'port skills select'.
+
+Adds skill groups, individual skills, or AI tool hook targets to ~/.port/config.yaml.
+Does not remove anything already selected. After saving, runs the same sync as
+'port skills sync' so new items appear under skills/ on disk.
+
+Interactive mode lists only groups, skills, and tools not already configured.
+Scripts and CI: pass --group, --skill, --tool, positional skill IDs, or -y/--yes
+to select every available option without prompts.
+
+Examples:
+  port skills add --group security
+  port skills add --skill integrations-overview
+  port skills add integrations-overview
+  port skills add -y
+  port skills add --skill my-skill --tool Cursor
+  port skills add --group operations --group security --tool "Claude Code"`,
+		Args: cobra.ArbitraryArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := cmd.Context()
+			flags := GetGlobalFlags(ctx)
+
+			mod, configManager, err := newSkillsModuleWithFlags(ctx, flags, skillsOrgName(cmd))
+			if err != nil {
+				return err
+			}
+
+			skillsCfg, err := configManager.LoadSkillsConfig()
+			if err != nil {
+				skillsCfg = &config.SkillsConfig{}
+			}
+
+			addOpts := skills.AddSkillsOptions{
+				Groups: groups,
+				Skills: append(append([]string(nil), skillsIDs...), args...),
+			}
+
+			explicit := skillsIncrementalExplicit(cmd, args)
+			acceptAll := skillsAcceptAll(cmd)
+			usePrompts := skillsUseInteractivePrompts(cmd) && !explicit
+
+			switch {
+			case usePrompts:
+				fetched, err := mod.FetchSkillsMetadata(ctx)
+				if err != nil {
+					return fmt.Errorf("failed to fetch skills from Port: %w", err)
+				}
+
+				availableGroups := skills.AvailableGroupsToAdd(skillsCfg, fetched)
+				if len(availableGroups) > 0 {
+					selected, err := promptAddGroupSelection(availableGroups)
+					if err != nil {
+						return err
+					}
+					addOpts.Groups = append(addOpts.Groups, selected...)
+				}
+
+				availableSkills := skills.AvailableSkillsToAdd(skillsCfg, fetched)
+				if len(availableSkills) > 0 {
+					selected, err := promptAddSkillSelection(availableSkills)
+					if err != nil {
+						return err
+					}
+					addOpts.Skills = append(addOpts.Skills, selected...)
+				}
+
+				unconfigured, err := unconfiguredHookTargets(configManager)
+				if err != nil {
+					return err
+				}
+				if len(unconfigured) > 0 {
+					configuredTools, err := configuredHookTargetNames(configManager)
+					if err != nil {
+						return err
+					}
+					targets, err := promptAddTargetSelection(unconfigured, configuredTools)
+					if err != nil {
+						return err
+					}
+					addOpts.Targets = targets
+				}
+
+				if len(addOpts.Groups) == 0 && len(addOpts.Skills) == 0 && len(addOpts.Targets) == 0 {
+					lipgloss.Printf("%s Nothing new to add — your current selection already includes all optional skills and configured tools.\n", styles.QuestionMark)
+					return nil
+				}
+			case explicit:
+				if len(tools) > 0 {
+					resolved, err := resolveTargetsByName(tools)
+					if err != nil {
+						return err
+					}
+					addOpts.Targets = resolved
+				}
+			case acceptAll:
+				fetched, err := mod.FetchSkillsMetadata(ctx)
+				if err != nil {
+					return fmt.Errorf("failed to fetch skills from Port: %w", err)
+				}
+				if err := populateAddAllAvailable(&addOpts, skillsCfg, fetched, configManager); err != nil {
+					return err
+				}
+				if len(addOpts.Groups) == 0 && len(addOpts.Skills) == 0 && len(addOpts.Targets) == 0 {
+					lipgloss.Printf("%s Nothing new to add — your current selection already includes all optional skills and configured tools.\n", styles.QuestionMark)
+					return nil
+				}
+			default:
+				return fmt.Errorf("non-interactive add requires %s", skillsNonInteractiveHint)
+			}
+
+			if !skillsCfg.HasSelection() && len(addOpts.Targets) == 0 &&
+				len(addOpts.Groups) == 0 && len(addOpts.Skills) == 0 {
+				return fmt.Errorf("no skill selection configured — run 'port skills init' first")
+			}
+			if !usePrompts && explicit && len(addOpts.Groups) == 0 && len(addOpts.Skills) == 0 && len(addOpts.Targets) == 0 {
+				return fmt.Errorf("specify at least one of --group, --skill, or --tool")
+			}
+
+			result, err := mod.AddSkills(ctx, addOpts)
+			if err != nil {
+				return err
+			}
+
+			for _, t := range result.NewTargets {
+				lipgloss.Printf("%s Hook installed for %s\n", styles.CheckMark, styles.Bold.Render(t))
+			}
+			for _, g := range result.Merge.AddedGroups {
+				lipgloss.Printf("%s Added group %s\n", styles.CheckMark, styles.Bold.Render(g))
+			}
+			for _, s := range result.Merge.AddedSkills {
+				lipgloss.Printf("%s Added skill %s\n", styles.CheckMark, styles.Bold.Render(s))
+			}
+			for _, g := range result.Merge.SkippedGroups {
+				lipgloss.Printf("%s Group %s already in your selection\n", styles.QuestionMark, g)
+			}
+			for _, s := range result.Merge.SkippedSkills {
+				lipgloss.Printf("%s Skill %s already in your selection\n", styles.QuestionMark, s)
+			}
+
+			if result.Sync != nil {
+				printLoadResult(result.Sync)
+			} else if !result.Merge.HasChanges() && len(result.NewTargets) == 0 {
+				lipgloss.Printf("%s No changes were made.\n", styles.QuestionMark)
+			}
+			return nil
+		},
+	}
+
+	cmd.Flags().StringArrayVar(&groups, "group", nil, "Skill group identifier to add (repeatable)")
+	cmd.Flags().StringArrayVar(&skillsIDs, "skill", nil, "Ungrouped or individual skill identifier to add (repeatable)")
+	cmd.Flags().StringArrayVar(&tools, "tool", nil, "AI tool name to install hooks for (repeatable, e.g. \"Cursor\")")
+	return cmd
+}
+
+func registerSkillsRemove() *cobra.Command {
+	var (
+		groups    []string
+		skillsIDs []string
+		tools     []string
+	)
+
+	cmd := &cobra.Command{
+		Use:   "remove [skill-identifier...]",
+		Short: "Remove groups, skills, or AI tools from your saved selection",
+		Long: `Incrementally shrink what you sync — without redoing 'port skills select'.
+
+Removes skill groups, individual skills, or AI tool targets from ~/.port/config.yaml.
+Removed tools also have hooks uninstalled and their Port-managed skills deleted.
+Remaining selection is re-synced so pruned skills disappear from disk.
+
+If you previously chose "all groups" or "all ungrouped skills", removing one item
+materializes the selection into an explicit list. New skills added in Port will
+not auto-sync until you 'port skills add' them again.
+
+Scripts and CI: pass --group, --skill, --tool, positional skill IDs, or -y/--yes
+to select every removable option without prompts (skips confirmation).
+
+Examples:
+  port skills remove --group legacy
+  port skills remove --skill integrations-overview
+  port skills remove integrations-overview
+  port skills remove -y
+  port skills remove --tool Windsurf
+  port skills remove --group operations --skill old-skill`,
+		Args: cobra.ArbitraryArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := cmd.Context()
+			flags := GetGlobalFlags(ctx)
+
+			mod, configManager, err := newSkillsModuleWithFlags(ctx, flags, skillsOrgName(cmd))
+			if err != nil {
+				return err
+			}
+
+			skillsCfg, err := configManager.LoadSkillsConfig()
+			if err != nil || (!skillsCfg.HasSelection() && len(skillsCfg.Targets) == 0) {
+				return fmt.Errorf("no skills configuration found — run 'port skills init' first")
+			}
+
+			removeOpts := skills.RemoveSkillsOptions{
+				Groups: groups,
+				Skills: append(append([]string(nil), skillsIDs...), args...),
+			}
+
+			explicit := skillsIncrementalExplicit(cmd, args)
+			acceptAll := skillsAcceptAll(cmd)
+			usePrompts := skillsUseInteractivePrompts(cmd) && !explicit
+
+			switch {
+			case usePrompts:
+				fetched, err := mod.FetchSkillsMetadata(ctx)
+				if err != nil {
+					return fmt.Errorf("failed to fetch skills from Port: %w", err)
+				}
+
+				removableGroups := skills.RemovableGroups(skillsCfg, fetched)
+				if len(removableGroups) > 0 {
+					selected, err := promptRemoveGroupSelection(removableGroups)
+					if err != nil {
+						return err
+					}
+					removeOpts.Groups = append(removeOpts.Groups, selected...)
+				}
+
+				removableSkills := skills.RemovableSkills(skillsCfg, fetched)
+				if len(removableSkills) > 0 {
+					selected, err := promptRemoveSkillSelection(removableSkills)
+					if err != nil {
+						return err
+					}
+					removeOpts.Skills = append(removeOpts.Skills, selected...)
+				}
+
+				configuredTargets, err := configuredHookTargets(configManager)
+				if err != nil {
+					return err
+				}
+				if len(configuredTargets) > 0 {
+					selected, err := promptRemoveTargetSelection(configuredTargets)
+					if err != nil {
+						return err
+					}
+					removeOpts.Targets = selected
+				}
+
+				if len(removeOpts.Groups) == 0 && len(removeOpts.Skills) == 0 && len(removeOpts.Targets) == 0 {
+					lipgloss.Printf("%s Nothing selected — no changes made.\n", styles.QuestionMark)
+					return nil
+				}
+
+				ok, err := confirmPrompt(
+					"Apply these removals?",
+					"Hooks for selected tools will be uninstalled and their synced skills deleted. Removed groups/skills will be pruned from local AI tool directories.",
+				)
+				if err != nil {
+					return err
+				}
+				if !ok {
+					lipgloss.Printf("%s Cancelled — no changes made.\n", styles.ExclamationMark)
+					return nil
+				}
+			case explicit:
+				if len(tools) > 0 {
+					resolved, err := resolveTargetsByName(tools)
+					if err != nil {
+						return err
+					}
+					removeOpts.Targets = resolved
+				}
+				if len(removeOpts.Groups) == 0 && len(removeOpts.Skills) == 0 && len(removeOpts.Targets) == 0 {
+					return fmt.Errorf("specify at least one of --group, --skill, or --tool")
+				}
+			case acceptAll:
+				fetched, err := mod.FetchSkillsMetadata(ctx)
+				if err != nil {
+					return fmt.Errorf("failed to fetch skills from Port: %w", err)
+				}
+				if err := populateRemoveAll(&removeOpts, skillsCfg, fetched, configManager); err != nil {
+					return err
+				}
+				if len(removeOpts.Groups) == 0 && len(removeOpts.Skills) == 0 && len(removeOpts.Targets) == 0 {
+					lipgloss.Printf("%s Nothing selected — no changes made.\n", styles.QuestionMark)
+					return nil
+				}
+			default:
+				return fmt.Errorf("non-interactive remove requires %s", skillsNonInteractiveHint)
+			}
+
+			result, err := mod.RemoveSkills(ctx, removeOpts)
+			if err != nil {
+				return err
+			}
+
+			if result.Remove.Materialized {
+				lipgloss.Printf(
+					"%s Selection switched from \"all\" to specific items. Future groups or skills added in Port will not sync until you run 'port skills add'.\n",
+					styles.ExclamationMark,
+				)
+			}
+			for _, t := range result.RemovedTargets {
+				lipgloss.Printf("%s Hook removed from %s\n", styles.CheckMark, styles.Bold.Render(t))
+			}
+			for _, g := range result.Remove.RemovedGroups {
+				lipgloss.Printf("%s Removed group %s\n", styles.CheckMark, styles.Bold.Render(g))
+			}
+			for _, s := range result.Remove.RemovedSkills {
+				lipgloss.Printf("%s Removed skill %s\n", styles.CheckMark, styles.Bold.Render(s))
+			}
+			for _, g := range result.Remove.SkippedGroups {
+				lipgloss.Printf("%s Skipped group %s (not in selection)\n", styles.QuestionMark, g)
+			}
+			for _, s := range result.Remove.SkippedSkills {
+				lipgloss.Printf("%s Skipped skill %s (not in selection)\n", styles.QuestionMark, s)
+			}
+
+			if result.Sync != nil {
+				printLoadResult(result.Sync)
+			} else if !result.Remove.HasChanges() && len(result.RemovedTargets) == 0 {
+				lipgloss.Printf("%s No changes were made.\n", styles.QuestionMark)
+			}
+			return nil
+		},
+	}
+
+	cmd.Flags().StringArrayVar(&groups, "group", nil, "Skill group identifier to remove (repeatable)")
+	cmd.Flags().StringArrayVar(&skillsIDs, "skill", nil, "Skill identifier to remove (repeatable)")
+	cmd.Flags().StringArrayVar(&tools, "tool", nil, "AI tool name to remove hooks for (repeatable, e.g. \"Cursor\")")
+	return cmd
+}
+
+func registerSkillsSync() *cobra.Command {
+	var (
+		includeGroups         []string
+		excludeGroups         []string
+		excludeLegacySkills   bool
+		includeInternalSkills bool
+		tools                 []string
+		installHooks          bool
+		groups                []string
+		skillsIDs             []string
+		selectAllGroups       bool
+		selectAllUngrouped    bool
+		noGitignore           bool
+		failOnSkillError      bool
+	)
+
+	cmd := &cobra.Command{
+		Use:   "sync",
+		Short: "Download skills from Port to local AI tool directories",
+		Long: `Refresh local skill files from Port and write them under each tool's skills/ tree.
+
+After 'port skills init', sync uses the targets and selection saved in
+~/.port/config.yaml. Without init, pass --tool to choose where files go for this run.
+
+Runtime flags (--tool, --group, --skill, select-all, include-group, exclude-group)
+apply to this sync only and are not written to config.yaml. Use 'port skills init',
+'select', 'add', or 'remove' to persist tools and selection.
+
+Skills with location="global" go to tool home directories; location="project" go
+under each registered project directory (or the current directory when using --tool).
+
+By default your organization's skills are synced; Port built-in registry skills are
+excluded unless you pass --include-internal. Use --exclude-legacy to omit older
+catalog skills that use the previous data model.
+
+By default, skills with invalid or incomplete files are skipped with a warning.
+Pass --fail-on-skill-error to fail the entire sync on the first invalid skill.
+
+Examples:
+  # Re-sync using saved config from 'port skills init'
+  port skills sync
+
+  # One tool (repeat --tool for each; names must match init prompts exactly)
+  port skills sync --tool "Agents (cross-platform)"   # ~/.agents/skills/
+  port skills sync --tool Cursor                     # ~/.cursor/skills/
+  port skills sync --tool "Claude Code"              # ~/.claude/skills/
+  port skills sync --tool "Gemini CLI"               # ~/.gemini/skills/
+  port skills sync --tool "OpenAI Codex"             # ~/.codex/skills/
+  port skills sync --tool Windsurf                   # ~/.codeium/windsurf/skills/
+  port skills sync --tool "GitHub Copilot"           # <repo>/.github/skills/ (run from repo root)
+
+  # Multiple tools in one sync
+  port skills sync --tool Cursor --tool "Claude Code"
+  port skills sync --tool Cursor --tool "Gemini CLI" --tool "OpenAI Codex"
+  port skills sync --tool "Agents (cross-platform)" --tool Cursor --tool Windsurf
+  port skills sync --tool Cursor --tool "Claude Code" --tool "GitHub Copilot"
+
+  # One-off selection (not saved to config)
+  port skills sync --tool Cursor --group operations --group security
+  port skills sync --tool Cursor --skill integrations-overview
+  port skills sync --tool Cursor --select-all-groups --select-all-ungrouped
+
+  # Catalog filters for this run
+  port skills sync --include-internal
+  port skills sync --exclude-legacy
+  port skills sync --tool Cursor --include-internal --exclude-legacy
+
+  # Adjust team group defaults for this run only
+  port skills sync --include-group operations --exclude-group legacy
+
+  # Install hooks and sync in one step (writes hooks; sync args stay ephemeral)
+  port skills sync --tool Cursor --install-hooks
+  port skills sync --tool Cursor --tool "Claude Code" --install-hooks
+
+  # Silent sync (used by session-start hooks)
+  port skills sync --quiet`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := cmd.Context()
+			flags := GetGlobalFlags(ctx)
+
+			mod, configManager, err := newSkillsModuleWithFlags(ctx, flags, skillsOrgName(cmd))
+			if err != nil {
+				return err
+			}
+
+			skillsCfg, err := configManager.LoadSkillsConfig()
+			if err != nil {
+				skillsCfg = &config.SkillsConfig{}
+			}
+
+			loadOpts := skills.LoadSkillsOptions{
+				ExcludeLegacySkills:   excludeLegacySkills,
+				IncludeInternalSkills: includeInternalSkills,
+				NoGitignore:           noGitignore,
+				FailOnSkillError:      failOnSkillError,
+			}
+			if len(includeGroups) > 0 || len(excludeGroups) > 0 {
+				loadOpts.IncludeGroups = mergeStringLists(skillsCfg.IncludeGroups, includeGroups)
+				loadOpts.ExcludeGroups = mergeStringLists(skillsCfg.ExcludeGroups, excludeGroups)
+				loadOpts.TeamGroupDefaults = skillsCfg.TeamGroupDefaults || skillsCfg.UsesTeamGroupDefaults() || len(includeGroups) > 0 || len(excludeGroups) > 0
+			}
+			selectionFlagsChanged := skillsSelectionNonInteractive(cmd, selectAllGroups, selectAllUngrouped)
+			if selectionFlagsChanged {
+				selectionOpts, err := loadSkillsOptsFromSelectionFlags(groups, skillsIDs, selectAllGroups, selectAllUngrouped, false)
+				if err != nil {
+					return err
+				}
+				loadOpts.SelectAll = selectionOpts.SelectAll
+				loadOpts.SelectAllGroups = selectionOpts.SelectAllGroups
+				loadOpts.SelectAllUngrouped = selectionOpts.SelectAllUngrouped
+				loadOpts.SelectedGroups = selectionOpts.SelectedGroups
+				loadOpts.SelectedSkills = selectionOpts.SelectedSkills
+			}
+			if len(tools) > 0 {
+				resolved, err := resolveTargetsByName(tools)
+				if err != nil {
+					return err
+				}
+				home, err := os.UserHomeDir()
+				if err != nil {
+					return fmt.Errorf("failed to get home directory: %w", err)
+				}
+				cwd, err := os.Getwd()
+				if err != nil {
+					return fmt.Errorf("failed to get working directory: %w", err)
+				}
+				if installHooks {
+					if err := skills.InstallHooks(resolved, home, cwd, mod.OrgName()); err != nil {
+						return fmt.Errorf("failed to install hooks: %w", err)
+					}
+				}
+				loadOpts.TargetOverrides = skills.TargetPaths(resolved, home, cwd)
+				loadOpts.ProjectDirOverrides = []string{cwd}
+			} else if installHooks {
+				return fmt.Errorf("--install-hooks requires at least one --tool")
+			}
+			if len(tools) > 0 || selectionFlagsChanged || len(includeGroups) > 0 || len(excludeGroups) > 0 {
+				loadOpts.NoSave = true
+			}
+
+			result, err := mod.LoadSkills(ctx, loadOpts)
 			if err != nil {
 				return fmt.Errorf("failed to sync skills: %w", err)
 			}
@@ -136,90 +726,32 @@ locally. Run 'port skills init' to change your selection.`,
 		},
 	}
 	cmd.Flags().BoolP("quiet", "q", false, "Suppress output (used automatically by AI tool hooks)")
+	cmd.Flags().StringArrayVar(&includeGroups, "include-group", nil, "Additional skill group(s) to sync (repeatable)")
+	cmd.Flags().StringArrayVar(&excludeGroups, "exclude-group", nil, "Skill group(s) to exclude from sync (repeatable)")
+	cmd.Flags().BoolVar(&excludeLegacySkills, "exclude-legacy", false, "Omit skills that use the previous Port catalog data model")
+	cmd.Flags().BoolVar(&includeInternalSkills, "include-internal", false, "Include Port built-in registry skills (excluded by default)")
+	cmd.Flags().StringArrayVar(&tools, "tool", nil, "AI tool name to sync to for this run (repeatable, e.g. \"Cursor\")")
+	cmd.Flags().BoolVar(&installHooks, "install-hooks", false, "Write session-start hooks for --tool targets before syncing")
+	cmd.Flags().StringArrayVar(&groups, "group", nil, "Skill group identifier to sync for this run (repeatable)")
+	cmd.Flags().StringArrayVar(&skillsIDs, "skill", nil, "Skill identifier to sync for this run (repeatable)")
+	cmd.Flags().BoolVar(&selectAllGroups, "select-all-groups", false, "Sync all skill groups for this run")
+	cmd.Flags().BoolVar(&selectAllUngrouped, "select-all-ungrouped", false, "Sync all ungrouped skills for this run")
+	cmd.Flags().BoolVar(&noGitignore, "no-gitignore", false, "Skip adding project-scoped skills paths to repository .gitignore files")
+	cmd.Flags().BoolVar(&failOnSkillError, "fail-on-skill-error", false, "Fail sync instead of warning when one skill cannot be written")
 	return cmd
 }
 
-func registerSkillsList() *cobra.Command {
-	return &cobra.Command{
-		Use:   "list",
-		Short: "List all available skills from Port",
-		Long: `Fetch and display all skills available in your Port organization.
-
-Shows skills grouped by their skill group, with required skills marked.
-This is a read-only command — it does not sync or modify any local files.`,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := cmd.Context()
-			flags := GetGlobalFlags(ctx)
-
-			mod, _, err := newSkillsModuleWithFlags(ctx, flags)
-			if err != nil {
-				return err
-			}
-
-			fetched, err := mod.FetchSkills(ctx)
-			if err != nil {
-				return fmt.Errorf("failed to fetch skills: %w", err)
-			}
-
-			total := len(fetched.Required) + len(fetched.Optional)
-			fmt.Printf("\nFound %d skill(s) in %d group(s)\n", total, len(fetched.Groups))
-			fmt.Println(strings.Repeat("─", 40))
-
-			if len(fetched.Required) > 0 {
-				fmt.Printf("\n%s Required (always synced):\n", styles.CheckMark)
-				for _, s := range fetched.Required {
-					printSkillLine(s, fetched.Groups)
-				}
-			}
-
-			groupedSkills := make(map[string][]skills.Skill)
-			var ungrouped []skills.Skill
-			for _, s := range fetched.Optional {
-				if s.GroupID == "" {
-					ungrouped = append(ungrouped, s)
-				} else {
-					groupedSkills[s.GroupID] = append(groupedSkills[s.GroupID], s)
-				}
-			}
-
-			for _, g := range fetched.Groups {
-				skills := groupedSkills[g.Identifier]
-				if len(skills) == 0 {
-					continue
-				}
-				label := g.Title
-				if label == "" {
-					label = g.Identifier
-				}
-				fmt.Printf("\n%s (%d):\n", styles.Bold.Render(label), len(skills))
-				for _, s := range skills {
-					printSkillLine(s, fetched.Groups)
-				}
-			}
-
-			if len(ungrouped) > 0 {
-				fmt.Printf("\n%s (%d):\n", styles.Bold.Render("Ungrouped"), len(ungrouped))
-				for _, s := range ungrouped {
-					printSkillLine(s, fetched.Groups)
-				}
-			}
-
-			fmt.Println()
-			return nil
-		},
+func mergeStringLists(base, extra []string) []string {
+	seen := make(map[string]bool)
+	var out []string
+	for _, s := range append(append([]string(nil), base...), extra...) {
+		if s == "" || seen[s] {
+			continue
+		}
+		seen[s] = true
+		out = append(out, s)
 	}
-}
-
-func printSkillLine(s skills.Skill, groups []skills.SkillGroup) {
-	name := s.Title
-	if name == "" {
-		name = s.Identifier
-	}
-	loc := "global"
-	if s.Location == skills.SkillLocationProject {
-		loc = "project"
-	}
-	fmt.Printf("  %-40s [%s]\n", name, loc)
+	return out
 }
 
 func registerSkillsClear() *cobra.Command {
@@ -227,15 +759,15 @@ func registerSkillsClear() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "clear",
-		Short: "Delete all locally synced Port skills from AI tool directories",
-		Long: `Delete all Port skills that were synced by 'port skills sync'.
+		Short: "Delete all local Port-managed skill files (keeps config and hooks)",
+		Long: `Delete every Port skill file synced to local AI tool directories.
 
-This removes the skills/port/ directory from every configured AI tool target
-(e.g. ~/.cursor/skills/port/, ~/.claude/skills/port/, ~/.gemini/skills/port/)
-and from any registered project directories.
+Removes Port-managed skills from each configured target (e.g. ~/.cursor/skills/)
+and registered project directories. Does not change ~/.port/config.yaml selection
+and does not remove session hooks.
 
-Hooks are NOT removed — run 'port skills init' again to reinstall, or run
-'port cache clear' to fully remove everything Port CLI installed.
+Skills will be re-downloaded on the next 'port skills sync' or session-start hook.
+Use 'port cache clear' to also remove hooks and wipe skills config.
 
 Use --force to skip the confirmation prompt.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -245,10 +777,10 @@ Use --force to skip the confirmation prompt.`,
 				return err
 			}
 
-			if !force {
+			if !ShouldSkipConfirm(cmd, force) {
 				ok, err := confirmPrompt(
 					"Delete all locally synced Port skills?",
-					"This will remove skills/port/ from all configured AI tool directories.\nHooks will remain in place — skills will be re-synced on the next session start.",
+					"This will remove Port-managed skills from all configured AI tool directories.\nHooks will remain in place — skills will be re-synced on the next session start.",
 				)
 				if err != nil {
 					return err
@@ -265,7 +797,7 @@ Use --force to skip the confirmation prompt.`,
 			}
 
 			for _, t := range result.DeletedTargets {
-				lipgloss.Printf("%s Deleted skills/port/ from %s\n", styles.CheckMark, styles.Bold.Render(t))
+				lipgloss.Printf("%s Deleted Port-managed skills from %s\n", styles.CheckMark, styles.Bold.Render(t))
 			}
 			for _, t := range result.SkippedTargets {
 				lipgloss.Printf("%s Skipped %s (no skills directory found)\n", styles.QuestionMark, t)
@@ -284,7 +816,7 @@ Use --force to skip the confirmation prompt.`,
 func registerSkillsStatus() *cobra.Command {
 	return &cobra.Command{
 		Use:   "status",
-		Short: "Show the current skills configuration and last sync time",
+		Short: "Show saved selection, hook targets, and last sync time",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			flags := GetGlobalFlags(cmd.Context())
 			mod, _, err := newSkillsModule(flags)
@@ -304,446 +836,3 @@ func registerSkillsStatus() *cobra.Command {
 }
 
 // --- shared helpers ---
-
-// newSkillsModule creates a Module using the default org from the config file.
-// Used by commands that only need local state (status, cache clear).
-func newSkillsModule(flags GlobalFlags) (*skills.Module, *config.ConfigManager, error) {
-	configManager := config.NewConfigManager(flags.ConfigFile)
-	cfg, err := configManager.Load()
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to load configuration: %w", err)
-	}
-	orgCfg := &config.OrganizationConfig{APIURL: "https://api.getport.io/v1"}
-	orgName := cfg.DefaultOrg
-	if orgName != "" {
-		if oc, ocErr := cfg.GetOrgConfig(orgName); ocErr == nil {
-			orgCfg = oc
-		}
-	}
-	// When the user authenticated via `port auth login` (OAuth), credentials are
-	// stored as a token rather than client_id/client_secret. Pass the token so the
-	// API client can use it directly without needing to re-authenticate.
-	token, _ := configManager.GetToken(orgName)
-	return skills.NewModule(token, orgCfg, configManager), configManager, nil
-}
-
-// newSkillsModuleWithFlags creates a Module honouring CLI flag overrides
-// (--client-id, --client-secret, --api-url). Used by commands that call the API.
-func newSkillsModuleWithFlags(ctx context.Context, flags GlobalFlags) (*skills.Module, *config.ConfigManager, error) {
-	configManager := config.NewConfigManager(flags.ConfigFile)
-	cfg, err := configManager.LoadWithOverrides(flags.ClientID, flags.ClientSecret, flags.APIURL, "")
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to load configuration: %w", err)
-	}
-	orgConfig, err := cfg.GetOrgConfig("")
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to get org config: %w", err)
-	}
-	// When the user authenticated via `port auth login` (OAuth), credentials are
-	// stored as a token rather than client_id/client_secret. Pass the token so the
-	// API client can use it directly without needing to re-authenticate.
-	token, err := configManager.GetOrRefreshToken(ctx, cfg.DefaultOrg)
-	if err != nil && !config.ShouldIgnoreGetOrRefreshTokenError(err) {
-		return nil, nil, err
-	}
-	return skills.NewModule(token, orgConfig, configManager), configManager, nil
-}
-
-// confirmPrompt shows a yes/no confirmation and returns whether the user accepted.
-func confirmPrompt(title, description string) (bool, error) {
-	var confirmed bool
-	form := huh.NewForm(
-		huh.NewGroup(
-			huh.NewConfirm().
-				Title(title).
-				Description(description).
-				Value(&confirmed),
-		),
-	).WithTheme(&styles.FormTheme{})
-	if err := form.Run(); err != nil {
-		return false, fmt.Errorf("prompt error: %w", err)
-	}
-	return confirmed, nil
-}
-
-// promptTargetSelection shows an interactive multi-select of AI tools and
-// returns the selected HookTargets. Previously saved targets are pre-selected.
-func promptTargetSelection(configManager *config.ConfigManager) ([]skills.HookTarget, error) {
-	allTargets := skills.DefaultHookTargets()
-
-	var preSelected []string
-	if configManager != nil {
-		if skillsCfg, err := configManager.LoadSkillsConfig(); err == nil {
-			preSelected = skills.ResolveTargetNames(skillsCfg.Targets, allTargets)
-		}
-	}
-
-	targetOptions := make([]huh.Option[string], 0, len(allTargets))
-	for _, t := range allTargets {
-		label := t.Name
-		if t.Note != "" {
-			label = fmt.Sprintf("%s (%s)", t.Name, t.Note)
-		}
-		opt := huh.NewOption(label, t.Name)
-		for _, ps := range preSelected {
-			if ps == t.Name {
-				opt = opt.Selected(true)
-				break
-			}
-		}
-		targetOptions = append(targetOptions, opt)
-	}
-
-	selectedNames := make([]string, len(preSelected))
-	copy(selectedNames, preSelected)
-	form := huh.NewForm(
-		huh.NewGroup(
-			huh.NewMultiSelect[string]().
-				Title("Which AI tools should have hooks installed?").
-				Description("Use space to select/deselect, enter to confirm.").
-				Options(targetOptions...).
-				Height(len(targetOptions) + 4).
-				Value(&selectedNames),
-		),
-	).WithHeight(0).WithTheme(&styles.FormTheme{})
-	if err := form.Run(); err != nil {
-		return nil, fmt.Errorf("prompt error: %w", err)
-	}
-
-	if len(selectedNames) == 0 {
-		return nil, fmt.Errorf("no AI tools selected — nothing to install")
-	}
-
-	nameSet := make(map[string]bool, len(selectedNames))
-	for _, n := range selectedNames {
-		nameSet[n] = true
-	}
-	var targets []skills.HookTarget
-	for _, t := range allTargets {
-		if nameSet[t.Name] {
-			targets = append(targets, t)
-		}
-	}
-	return targets, nil
-}
-
-func buildLoadSkillsOpts(ctx context.Context, mod *skills.Module, promptSelection bool) (skills.LoadSkillsOptions, error) {
-	if !promptSelection {
-		return skills.LoadSkillsOptions{}, nil
-	}
-
-	fetched, err := mod.FetchSkills(ctx)
-	if err != nil {
-		return skills.LoadSkillsOptions{}, fmt.Errorf("failed to fetch skills from Port: %w", err)
-	}
-
-	if len(fetched.Required) > 0 {
-		requiredNames := make([]string, 0, len(fetched.Required))
-		for _, s := range fetched.Required {
-			name := s.Title
-			if name == "" {
-				name = s.Identifier
-			}
-			requiredNames = append(requiredNames, name)
-		}
-		lipgloss.Printf(
-			"\n%s Required skills (always synced regardless of selection):\n  %s\n\n",
-			styles.CheckMark,
-			strings.Join(requiredNames, ", "),
-		)
-	}
-
-	if len(fetched.Optional) == 0 && len(fetched.Groups) == 0 {
-		lipgloss.Printf("%s No optional skills found — only required skills will be synced.\n", styles.QuestionMark)
-		return skills.LoadSkillsOptions{}, nil
-	}
-
-	var requiredGroups, optionalGroups []skills.SkillGroup
-	for _, g := range fetched.Groups {
-		if g.Required {
-			requiredGroups = append(requiredGroups, g)
-		} else {
-			optionalGroups = append(optionalGroups, g)
-		}
-	}
-
-	if len(requiredGroups) > 0 {
-		requiredGroupNames := make([]string, 0, len(requiredGroups))
-		for _, g := range requiredGroups {
-			requiredGroupNames = append(requiredGroupNames, groupLabel(g))
-		}
-		lipgloss.Printf(
-			"%s Required groups (always synced regardless of selection): %s\n\n",
-			styles.CheckMark,
-			strings.Join(requiredGroupNames, ", "),
-		)
-	}
-
-	selectAllGroups, selectedGroups, err := promptGroupSelection(optionalGroups)
-	if err != nil {
-		return skills.LoadSkillsOptions{}, err
-	}
-
-	var ungroupedSkills []skills.Skill
-	for _, s := range fetched.Optional {
-		if s.GroupID == "" {
-			ungroupedSkills = append(ungroupedSkills, s)
-		}
-	}
-
-	selectAllUngrouped, selectedSkills, err := promptUngroupedSelection(ungroupedSkills)
-	if err != nil {
-		return skills.LoadSkillsOptions{}, err
-	}
-
-	return skills.LoadSkillsOptions{
-		SelectAllGroups:    selectAllGroups,
-		SelectAllUngrouped: selectAllUngrouped,
-		SelectedGroups:     selectedGroups,
-		SelectedSkills:     selectedSkills,
-	}, nil
-}
-
-func promptGroupSelection(groups []skills.SkillGroup) (selectAll bool, selected []string, err error) {
-	if len(groups) == 0 {
-		return false, nil, nil
-	}
-
-	syncAll := false
-	form := huh.NewForm(
-		huh.NewGroup(
-			huh.NewConfirm().
-				Title("Sync all skill groups?").
-				Description(fmt.Sprintf("%d group(s) available. Yes = sync all groups, No = pick specific groups.", len(groups))).
-				Value(&syncAll),
-		),
-	).WithTheme(&styles.FormTheme{})
-	if err := form.Run(); err != nil {
-		return false, nil, fmt.Errorf("prompt error: %w", err)
-	}
-
-	if syncAll {
-		lipgloss.Printf("\n%s All groups selected:\n", styles.CheckMark)
-		for _, g := range groups {
-			lipgloss.Printf("  %s %s\n", styles.CheckMark, groupLabel(g))
-		}
-		fmt.Println()
-		return true, nil, nil
-	}
-
-	groupOptions := make([]huh.Option[string], 0, len(groups))
-	for _, g := range groups {
-		groupOptions = append(groupOptions, huh.NewOption(groupLabel(g), g.Identifier))
-	}
-	pickForm := huh.NewForm(
-		huh.NewGroup(
-			huh.NewMultiSelect[string]().
-				Title("Which skill groups would you like to sync?").
-				Description("Use space to select/deselect, enter to confirm.").
-				Options(groupOptions...).
-				Height(len(groupOptions) + 4).
-				Value(&selected),
-		),
-	).WithHeight(0).WithTheme(&styles.FormTheme{})
-	if err := pickForm.Run(); err != nil {
-		return false, nil, fmt.Errorf("prompt error: %w", err)
-	}
-
-	selectedSet := toStringSet(selected)
-	lipgloss.Printf("\n%s Groups:\n", styles.CheckMark)
-	for _, g := range groups {
-		if selectedSet[g.Identifier] {
-			lipgloss.Printf("  %s %s\n", styles.CheckMark, groupLabel(g))
-		} else {
-			lipgloss.Printf("  %s %s\n", styles.Circle, groupLabel(g))
-		}
-	}
-	fmt.Println()
-
-	return false, selected, nil
-}
-
-func promptUngroupedSelection(ungroupedSkills []skills.Skill) (selectAll bool, selected []string, err error) {
-	if len(ungroupedSkills) == 0 {
-		return false, nil, nil
-	}
-
-	syncAll := false
-	form := huh.NewForm(
-		huh.NewGroup(
-			huh.NewConfirm().
-				Title("Sync all skills without a group?").
-				Description(fmt.Sprintf("%d skill(s) are not part of any group. Yes = sync all, No = pick specific ones.", len(ungroupedSkills))).
-				Value(&syncAll),
-		),
-	).WithTheme(&styles.FormTheme{})
-	if err := form.Run(); err != nil {
-		return false, nil, fmt.Errorf("prompt error: %w", err)
-	}
-
-	if syncAll {
-		lipgloss.Printf("\n%s All ungrouped skills selected:\n", styles.CheckMark)
-		for _, s := range ungroupedSkills {
-			lipgloss.Printf("  %s %s\n", styles.CheckMark, skillLabel(s))
-		}
-		fmt.Println()
-		return true, nil, nil
-	}
-
-	skillOptions := make([]huh.Option[string], 0, len(ungroupedSkills))
-	for _, s := range ungroupedSkills {
-		skillOptions = append(skillOptions, huh.NewOption(skillLabel(s), s.Identifier))
-	}
-	pickForm := huh.NewForm(
-		huh.NewGroup(
-			huh.NewMultiSelect[string]().
-				Title("Which ungrouped skills would you like to sync?").
-				Description("These skills have no group. Use space to select/deselect, enter to confirm.").
-				Options(skillOptions...).
-				Height(len(skillOptions) + 4).
-				Value(&selected),
-		),
-	).WithHeight(0).WithTheme(&styles.FormTheme{})
-	if err := pickForm.Run(); err != nil {
-		return false, nil, fmt.Errorf("prompt error: %w", err)
-	}
-
-	selectedSet := toStringSet(selected)
-	lipgloss.Printf("\n%s Ungrouped skills:\n", styles.CheckMark)
-	for _, s := range ungroupedSkills {
-		if selectedSet[s.Identifier] {
-			lipgloss.Printf("  %s %s\n", styles.CheckMark, skillLabel(s))
-		} else {
-			lipgloss.Printf("  %s %s\n", styles.Circle, skillLabel(s))
-		}
-	}
-	fmt.Println()
-
-	return false, selected, nil
-}
-
-func groupLabel(g skills.SkillGroup) string {
-	if g.Title != "" {
-		return g.Title
-	}
-	return g.Identifier
-}
-
-func skillLabel(s skills.Skill) string {
-	if s.Title != "" {
-		return s.Title
-	}
-	return s.Identifier
-}
-
-func toStringSet(slice []string) map[string]bool {
-	s := make(map[string]bool, len(slice))
-	for _, v := range slice {
-		s[v] = true
-	}
-	return s
-}
-
-func valueOrNone(s string) string {
-	if s == "" {
-		return "(not set)"
-	}
-	return s
-}
-
-// printLoadResult writes the sync summary to stderr so that AI tool hooks
-// (Cursor, Claude Code, Gemini CLI, etc.) see an empty stdout and do not
-// attempt to parse the human-readable output as JSON.
-func printLoadResult(result *skills.LoadSkillsResult) {
-	total := result.RequiredCount + result.SelectedCount
-	fmt.Fprintf(os.Stderr,
-		"%s %d skill(s) synced (%d required, %d selected)\n",
-		styles.CheckMark,
-		total,
-		result.RequiredCount,
-		result.SelectedCount,
-	)
-
-	if len(result.TargetResults) == 0 {
-		return
-	}
-
-	var globalTargets, projectTargets []skills.TargetResult
-	for _, t := range result.TargetResults {
-		if t.IsProject {
-			projectTargets = append(projectTargets, t)
-		} else {
-			globalTargets = append(globalTargets, t)
-		}
-	}
-
-	if len(globalTargets) > 0 {
-		fmt.Fprintln(os.Stderr)
-		for _, t := range globalTargets {
-			fmt.Fprintf(os.Stderr, "  %s %s/skills/port/  %s  %s\n",
-				styles.Circle,
-				t.Path,
-				styles.GlobalLabel,
-				styles.Faint.Render(fmt.Sprintf("%d skills", t.SkillCount)),
-			)
-		}
-	}
-
-	if len(projectTargets) > 0 {
-		fmt.Fprintln(os.Stderr)
-		for _, t := range projectTargets {
-			fmt.Fprintf(os.Stderr, "  %s %s/skills/port/  %s  %s\n",
-				styles.Circle,
-				t.Path,
-				styles.ProjectLabel,
-				styles.Faint.Render(fmt.Sprintf("%d skills", t.SkillCount)),
-			)
-		}
-	}
-	fmt.Fprintln(os.Stderr)
-}
-
-func printSkillsStatus(status *skills.StatusResult) {
-	fmt.Println("\nPort Skills Status")
-	fmt.Println(strings.Repeat("─", 40))
-	fmt.Printf("Last synced:     %s\n", valueOrNone(status.LastSyncedAt))
-	fmt.Printf("\nHook targets (%d):\n", len(status.Targets))
-	for _, t := range status.Targets {
-		fmt.Printf("  - %s/skills/port/\n", t)
-	}
-	fmt.Printf("\nProject directories (%d):\n", len(status.ProjectDirs))
-	if len(status.ProjectDirs) == 0 {
-		fmt.Println("  (none)")
-	}
-	for _, d := range status.ProjectDirs {
-		fmt.Printf("  - %s\n", d)
-	}
-	fmt.Printf("\nSkill selection:\n")
-	if status.SelectAll {
-		fmt.Println("  Groups:           all")
-		fmt.Println("  Ungrouped skills: all")
-	} else {
-		if status.SelectAllGroups {
-			fmt.Println("  Groups:           all")
-		} else {
-			fmt.Printf("  Groups (%d):\n", len(status.SelectedGroups))
-			if len(status.SelectedGroups) == 0 {
-				fmt.Println("    (none)")
-			}
-			for _, g := range status.SelectedGroups {
-				fmt.Printf("    - %s\n", g)
-			}
-		}
-		if status.SelectAllUngrouped {
-			fmt.Println("  Ungrouped skills: all")
-		} else {
-			fmt.Printf("  Ungrouped skills (%d):\n", len(status.SelectedSkills))
-			if len(status.SelectedSkills) == 0 {
-				fmt.Println("    (none)")
-			}
-			for _, s := range status.SelectedSkills {
-				fmt.Printf("    - %s\n", s)
-			}
-		}
-	}
-}

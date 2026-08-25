@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"runtime"
 
-	"github.com/port-experimental/port-cli/internal/output"
-	"github.com/port-experimental/port-cli/internal/update"
-	"github.com/port-experimental/port-cli/internal/useragent"
+	"github.com/port-labs/port-cli/internal/output"
+	"github.com/port-labs/port-cli/internal/update"
+	"github.com/port-labs/port-cli/internal/useragent"
 	"github.com/spf13/cobra"
 )
 
@@ -41,14 +41,18 @@ func RegisterVersion(rootCmd *cobra.Command) {
 		Use:   "version",
 		Short: "Show the CLI version",
 		Run: func(cmd *cobra.Command, args []string) {
-			banner := output.Banner(output.VersionInfo{
-				Version:   buildInfo.Version,
-				BuildDate: buildInfo.BuildDate,
-				Commit:    buildInfo.Commit,
-				GoVersion: buildInfo.GoVersion,
-				Platform:  buildInfo.Platform,
-			})
-			fmt.Println(banner)
+			if GetGlobalFlags(cmd.Context()).Quiet {
+				output.QuietPrint("%s\n", buildInfo.Version)
+			} else {
+				banner := output.Banner(output.VersionInfo{
+					Version:   buildInfo.Version,
+					BuildDate: buildInfo.BuildDate,
+					Commit:    buildInfo.Commit,
+					GoVersion: buildInfo.GoVersion,
+					Platform:  buildInfo.Platform,
+				})
+				output.Println(banner)
+			}
 
 			if check {
 				output.Printf("\nChecking for updates...\n")

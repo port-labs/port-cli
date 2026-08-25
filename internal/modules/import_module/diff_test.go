@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/port-experimental/port-cli/internal/api"
-	"github.com/port-experimental/port-cli/internal/modules/export"
+	"github.com/port-labs/port-cli/internal/api"
+	"github.com/port-labs/port-cli/internal/modules/export"
 )
 
 // mockClient is a minimal stub to satisfy DiffComparer's need for *api.Client.
@@ -66,12 +66,116 @@ func TestComparePermissions_NewEntry(t *testing.T) {
 	}
 }
 
+func TestCompareBlueprints_AllowsRuleCustomSystemBlueprintPatch(t *testing.T) {
+	comparer := &DiffComparer{}
+	source := []api.Blueprint{
+		{
+			"identifier": "_rule",
+			"properties": map[string]interface{}{
+				"custom_rule_owner": map[string]interface{}{"type": "string"},
+			},
+		},
+	}
+	current := []api.Blueprint{
+		{
+			"identifier": "_rule",
+			"properties": map[string]interface{}{
+				"level": map[string]interface{}{"type": "string"},
+			},
+		},
+	}
+
+	_, update, skip := comparer.compareBlueprints(source, current, nil)
+	if len(skip) != 0 {
+		t.Fatalf("expected _rule custom patch not to be skipped, got %#v", skip)
+	}
+	if len(update) != 1 {
+		t.Fatalf("expected _rule custom patch to be updated, got %d", len(update))
+	}
+}
+
+func TestCompareBlueprints_SystemPatchMissingFromCurrentIsUpdatedNotCreated(t *testing.T) {
+	comparer := &DiffComparer{}
+	source := []api.Blueprint{
+		{
+			"identifier": "_rule_result",
+			"relations": map[string]interface{}{
+				"custom_target": map[string]interface{}{"target": "service"},
+			},
+		},
+	}
+
+	create, update, skip := comparer.compareBlueprints(source, nil, nil)
+	if len(skip) != 0 {
+		t.Fatalf("expected no skipped blueprints, got %#v", skip)
+	}
+	if len(create) != 0 {
+		t.Fatalf("expected system patch not to be created, got %#v", create)
+	}
+	if len(update) != 1 {
+		t.Fatalf("expected system patch to be updated, got %d", len(update))
+	}
+}
+
+func TestCompareActions_IncludesAutomationsResource(t *testing.T) {
+	comparer := &DiffComparer{}
+	source := []api.Action{
+		{"identifier": "ttl-expire", "trigger": map[string]interface{}{"type": "automation"}},
+	}
+
+	create, update, skip := comparer.compareActions(source, nil, []string{"automations"})
+	if len(update) != 0 || len(skip) != 0 {
+		t.Fatalf("expected no update/skip actions, got update=%#v skip=%#v", update, skip)
+	}
+	if len(create) != 1 || create[0]["identifier"] != "ttl-expire" {
+		t.Fatalf("expected automation action to be created, got %#v", create)
+	}
+}
+
 // TestDiffResult_BlueprintPermissionsField verifies the DiffResult struct has
-// BlueprintPermissions and ActionPermissions fields of type []PermissionsChange.
+// BlueprintPermissions, ActionPermissions, and PagePermissions fields.
 func TestDiffResult_PermissionsFields(_ *testing.T) {
 	_ = DiffResult{
 		BlueprintPermissions: []PermissionsChange{},
 		ActionPermissions:    []PermissionsChange{},
+		PagePermissions:      []PermissionsChange{},
+	}
+}
+
+func TestComparePermissions_DetectsExtraFieldsAsChange(t *testing.T) {
+	current := map[string]api.Permissions{
+		"service": {
+			"entities":  map[string]interface{}{"view": []string{"$team"}},
+			"createdAt": "2026-01-01",
+		},
+	}
+	desired := map[string]api.Permissions{
+		"service": {
+			"entities": map[string]interface{}{"view": []string{"$team"}},
+		},
+	}
+
+	changes := comparePermissions(current, desired)
+	if len(changes) != 1 {
+		t.Errorf("expected 1 change (extra field in current is a diff), got %d", len(changes))
+	}
+}
+
+func TestComparePermissions_NormalizesStringSliceOrder(t *testing.T) {
+	current := map[string]api.Permissions{
+		"service": {
+			"entities": map[string]interface{}{"view": []interface{}{"beta", "alpha"}},
+		},
+	}
+	desired := map[string]api.Permissions{
+		"service": {
+			"entities": map[string]interface{}{"view": []interface{}{"alpha", "beta"}},
+		},
+	}
+
+	changes := comparePermissions(current, desired)
+	if len(changes) != 0 {
+		t.Errorf("expected no changes (string slice order should be normalized), got %d", len(changes))
 	}
 }
 

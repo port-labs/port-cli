@@ -6,7 +6,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-OPENAPI_URL="https://raw.githubusercontent.com/port-experimental/port-js/main/openapi.json"
+OPENAPI_URL="https://raw.githubusercontent.com/port-labs/port-js/main/openapi.json"
 OPENAPI_SPEC_DIR="$PROJECT_ROOT/api-specs"
 OPENAPI_SPEC_FILE="$OPENAPI_SPEC_DIR/openapi.json"
 GENERATED_DIR="$PROJECT_ROOT/internal/api/generated"

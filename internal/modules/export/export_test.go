@@ -2,13 +2,16 @@ package export
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/port-experimental/port-cli/internal/api"
+	"github.com/port-labs/port-cli/internal/api"
 )
 
 func TestOptions_Validate(t *testing.T) {
@@ -151,23 +154,397 @@ func TestWriteJSON_IncludesPermissions(t *testing.T) {
 		ActionPermissions: map[string]api.Permissions{
 			"deploy": {"execute": map[string]interface{}{"users": []string{}}},
 		},
+		PagePermissions: map[string]api.Permissions{
+			"dashboard": {"roles": map[string]interface{}{"view": []string{"Admin"}}},
+		},
 	}
 	var buf bytes.Buffer
 	if err := d.WriteJSON(&buf); err != nil {
 		t.Fatalf("WriteJSON error: %v", err)
 	}
 	output := buf.String()
-	if !strings.Contains(output, `"BlueprintPermissions"`) {
-		t.Errorf("expected BlueprintPermissions key in JSON output, got: %s", output)
+	if !strings.Contains(output, `"blueprint_permissions"`) {
+		t.Errorf("expected blueprint_permissions key in JSON output, got: %s", output)
 	}
-	if !strings.Contains(output, `"ActionPermissions"`) {
-		t.Errorf("expected ActionPermissions key in JSON output, got: %s", output)
+	if !strings.Contains(output, `"action_permissions"`) {
+		t.Errorf("expected action_permissions key in JSON output, got: %s", output)
+	}
+	if !strings.Contains(output, `"page_permissions"`) {
+		t.Errorf("expected page_permissions key in JSON output, got: %s", output)
 	}
 	if !strings.Contains(output, `"_folders"`) {
 		t.Errorf("expected _folders key in JSON output, got: %s", output)
 	}
 	if !strings.Contains(output, "service") {
 		t.Errorf("expected 'service' identifier in permissions JSON, got: %s", output)
+	}
+}
+
+func TestExecute_StreamsEntitiesFromGetEndpoint(t *testing.T) {
+	countCalls := 0
+	entitiesCalls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/auth/access_token":
+			json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "accessToken": "tok", "expiresIn": 3600})
+		case "/blueprints":
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"ok":         true,
+				"blueprints": []map[string]interface{}{{"identifier": "service"}},
+			})
+		case "/blueprints/service/entities-count":
+			countCalls++
+			json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "count": 2})
+		case "/blueprints/service/entities":
+			entitiesCalls++
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"ok": true,
+				"entities": []map[string]interface{}{
+					{"identifier": "svc-1", "blueprint": "service"},
+					{"identifier": "svc-2", "blueprint": "service"},
+				},
+			})
+		default:
+			json.NewEncoder(w).Encode(map[string]interface{}{"ok": true})
+		}
+	}))
+	defer server.Close()
+
+	module := &Module{client: api.NewClient(api.ClientOpts{ClientID: "id", ClientSecret: "secret", APIURL: server.URL})}
+	outputPath := filepath.Join(t.TempDir(), "export.json")
+	result, err := module.Execute(context.Background(), Options{
+		OutputPath:       outputPath,
+		Format:           "json",
+		IncludeResources: []string{"entities"},
+	})
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if !result.Success {
+		t.Fatalf("export failed: %v", result.Error)
+	}
+	if result.EntitiesCount != 2 {
+		t.Fatalf("expected 2 streamed entities, got %d", result.EntitiesCount)
+	}
+	if countCalls != 1 {
+		t.Fatalf("expected 1 entities-count call, got %d", countCalls)
+	}
+	if entitiesCalls != 1 {
+		t.Fatalf("expected 1 entities GET call, got %d", entitiesCalls)
+	}
+	content, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("read output: %v", err)
+	}
+	var parsed struct {
+		Entities []map[string]interface{} `json:"entities"`
+	}
+	if err := json.Unmarshal(content, &parsed); err != nil {
+		t.Fatalf("output JSON was invalid: %v", err)
+	}
+	if len(parsed.Entities) != 2 {
+		t.Fatalf("expected 2 entities in output, got %d", len(parsed.Entities))
+	}
+}
+
+func TestExecute_StreamsLargeBlueprintEntitiesFromSearch(t *testing.T) {
+	countCalls := 0
+	getCalls := 0
+	searchCalls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/auth/access_token":
+			json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "accessToken": "tok", "expiresIn": 3600})
+		case "/blueprints":
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"ok":         true,
+				"blueprints": []map[string]interface{}{{"identifier": "service"}},
+			})
+		case "/blueprints/service/entities-count":
+			countCalls++
+			json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "count": 10001})
+		case "/blueprints/service/entities":
+			getCalls++
+			http.Error(w, "unexpected GET entities call", http.StatusInternalServerError)
+		case "/blueprints/service/entities/search":
+			searchCalls++
+			var body map[string]interface{}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode search body: %v", err)
+			}
+			if body["limit"] != float64(1000) {
+				t.Fatalf("expected search limit 1000, got %#v", body["limit"])
+			}
+			if _, ok := body["query"].(map[string]interface{}); !ok {
+				t.Fatalf("expected wrapped query body, got %#v", body)
+			}
+			switch searchCalls {
+			case 1:
+				if _, ok := body["from"]; ok {
+					t.Fatalf("first search request should not include from: %#v", body)
+				}
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"ok":       true,
+					"next":     "cursor-1",
+					"entities": []map[string]interface{}{{"identifier": "svc-1", "blueprint": "service"}},
+				})
+			case 2:
+				if body["from"] != "cursor-1" {
+					t.Fatalf("expected cursor-1, got %#v", body["from"])
+				}
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"ok":       true,
+					"entities": []map[string]interface{}{{"identifier": "svc-2", "blueprint": "service"}},
+				})
+			default:
+				http.Error(w, "unexpected extra search call", http.StatusInternalServerError)
+			}
+		default:
+			json.NewEncoder(w).Encode(map[string]interface{}{"ok": true})
+		}
+	}))
+	defer server.Close()
+
+	module := &Module{client: api.NewClient(api.ClientOpts{ClientID: "id", ClientSecret: "secret", APIURL: server.URL})}
+	outputPath := filepath.Join(t.TempDir(), "export.json")
+	result, err := module.Execute(context.Background(), Options{
+		OutputPath:       outputPath,
+		Format:           "json",
+		IncludeResources: []string{"entities"},
+	})
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if !result.Success {
+		t.Fatalf("export failed: %v", result.Error)
+	}
+	if result.EntitiesCount != 2 {
+		t.Fatalf("expected 2 streamed entities, got %d", result.EntitiesCount)
+	}
+	if countCalls != 1 {
+		t.Fatalf("expected 1 entities-count call, got %d", countCalls)
+	}
+	if getCalls != 0 {
+		t.Fatalf("expected no entities GET calls, got %d", getCalls)
+	}
+	if searchCalls != 2 {
+		t.Fatalf("expected 2 search calls, got %d", searchCalls)
+	}
+	content, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("read output: %v", err)
+	}
+	var parsed struct {
+		Entities []map[string]interface{} `json:"entities"`
+	}
+	if err := json.Unmarshal(content, &parsed); err != nil {
+		t.Fatalf("output JSON was invalid: %v", err)
+	}
+	if len(parsed.Entities) != 2 {
+		t.Fatalf("expected 2 entities in output, got %d", len(parsed.Entities))
+	}
+}
+
+func TestExecute_ActionsOnly_ScopesBlueprintsToReferenced(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/auth/access_token":
+			json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "accessToken": "tok", "expiresIn": 3600})
+		case "/blueprints":
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"ok": true,
+				"blueprints": []map[string]interface{}{
+					{"identifier": "service"},
+					{"identifier": "domain"},
+				},
+			})
+		case "/blueprints/service/actions":
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"ok":      true,
+				"actions": []map[string]interface{}{{"identifier": "deploy"}},
+			})
+		case "/blueprints/domain/actions":
+			json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "actions": []interface{}{}})
+		case "/actions":
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"ok": true,
+				"actions": []map[string]interface{}{{
+					"identifier": "deploy",
+					"trigger": map[string]interface{}{
+						"type":                "self-service",
+						"blueprintIdentifier": "service",
+					},
+				}},
+			})
+		default:
+			json.NewEncoder(w).Encode(map[string]interface{}{"ok": true})
+		}
+	}))
+	defer server.Close()
+
+	module := &Module{client: api.NewClient(api.ClientOpts{ClientID: "id", ClientSecret: "secret", APIURL: server.URL})}
+	outputPath := filepath.Join(t.TempDir(), "export.json")
+	result, err := module.Execute(context.Background(), Options{
+		OutputPath:          outputPath,
+		Format:              "json",
+		SkipEntities:        true,
+		IncludeResources:    []string{"blueprints", "actions"},
+		Actions:             []string{"deploy"},
+		AutoScopeBlueprints: true,
+	})
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if !result.Success {
+		t.Fatalf("export failed: %v", result.Error)
+	}
+	if result.BlueprintsCount != 1 {
+		t.Fatalf("expected 1 blueprint in result count, got %d", result.BlueprintsCount)
+	}
+	content, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("read output: %v", err)
+	}
+	var parsed struct {
+		Blueprints []map[string]interface{} `json:"blueprints"`
+	}
+	if err := json.Unmarshal(content, &parsed); err != nil {
+		t.Fatalf("output JSON was invalid: %v", err)
+	}
+	if len(parsed.Blueprints) != 1 || parsed.Blueprints[0]["identifier"] != "service" {
+		t.Fatalf("expected only 'service' blueprint in output, got %v", parsed.Blueprints)
+	}
+}
+
+func TestExecute_EntitiesOnly_ScopesBlueprintsToReferenced(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/auth/access_token":
+			json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "accessToken": "tok", "expiresIn": 3600})
+		case "/blueprints":
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"ok": true,
+				"blueprints": []map[string]interface{}{
+					{"identifier": "service"},
+					{"identifier": "domain"},
+				},
+			})
+		case "/blueprints/service/entities-count":
+			json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "count": 1})
+		case "/blueprints/service/entities":
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"ok": true,
+				"entities": []map[string]interface{}{
+					{"identifier": "ent1", "blueprint": "service"},
+				},
+			})
+		case "/blueprints/domain/entities-count":
+			json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "count": 1})
+		case "/blueprints/domain/entities":
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"ok": true,
+				"entities": []map[string]interface{}{
+					{"identifier": "ent2", "blueprint": "domain"},
+				},
+			})
+		default:
+			json.NewEncoder(w).Encode(map[string]interface{}{"ok": true})
+		}
+	}))
+	defer server.Close()
+
+	module := &Module{client: api.NewClient(api.ClientOpts{ClientID: "id", ClientSecret: "secret", APIURL: server.URL})}
+	outputPath := filepath.Join(t.TempDir(), "export.json")
+	// entity ID filter selects only "ent1", which belongs to "service".
+	result, err := module.Execute(context.Background(), Options{
+		OutputPath:          outputPath,
+		Format:              "json",
+		IncludeResources:    []string{"blueprints", "entities"},
+		Entities:            []string{"ent1"},
+		AutoScopeBlueprints: true,
+	})
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if !result.Success {
+		t.Fatalf("export failed: %v", result.Error)
+	}
+	if result.BlueprintsCount != 1 {
+		t.Fatalf("expected 1 blueprint, got %d", result.BlueprintsCount)
+	}
+	content, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("read output: %v", err)
+	}
+	var parsed struct {
+		Blueprints []map[string]interface{} `json:"blueprints"`
+	}
+	if err := json.Unmarshal(content, &parsed); err != nil {
+		t.Fatalf("output JSON was invalid: %v", err)
+	}
+	if len(parsed.Blueprints) != 1 || parsed.Blueprints[0]["identifier"] != "service" {
+		t.Fatalf("expected only 'service' blueprint in output, got %v", parsed.Blueprints)
+	}
+}
+
+func TestExecute_BlueprintsExplicit_KeepsFullSetAlongsideActions(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/auth/access_token":
+			json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "accessToken": "tok", "expiresIn": 3600})
+		case "/blueprints":
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"ok": true,
+				"blueprints": []map[string]interface{}{
+					{"identifier": "service"},
+					{"identifier": "domain"},
+				},
+			})
+		case "/blueprints/service/actions":
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"ok":      true,
+				"actions": []map[string]interface{}{{"identifier": "deploy"}},
+			})
+		case "/blueprints/domain/actions":
+			json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "actions": []interface{}{}})
+		case "/actions":
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"ok": true,
+				"actions": []map[string]interface{}{{
+					"identifier": "deploy",
+					"trigger": map[string]interface{}{
+						"type":                "self-service",
+						"blueprintIdentifier": "service",
+					},
+				}},
+			})
+		default:
+			json.NewEncoder(w).Encode(map[string]interface{}{"ok": true})
+		}
+	}))
+	defer server.Close()
+
+	module := &Module{client: api.NewClient(api.ClientOpts{ClientID: "id", ClientSecret: "secret", APIURL: server.URL})}
+	outputPath := filepath.Join(t.TempDir(), "export.json")
+	// Simulates `--blueprints --actions deploy`: AutoScopeBlueprints is false
+	// because the caller explicitly asked for blueprints (computed at the
+	// command layer in Task 3).
+	result, err := module.Execute(context.Background(), Options{
+		OutputPath:          outputPath,
+		Format:              "json",
+		SkipEntities:        true,
+		IncludeResources:    []string{"blueprints", "actions"},
+		Actions:             []string{"deploy"},
+		AutoScopeBlueprints: false,
+	})
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if !result.Success {
+		t.Fatalf("export failed: %v", result.Error)
+	}
+	if result.BlueprintsCount != 2 {
+		t.Fatalf("expected both blueprints kept when AutoScopeBlueprints is false, got %d", result.BlueprintsCount)
 	}
 }
 

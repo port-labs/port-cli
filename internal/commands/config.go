@@ -3,8 +3,9 @@ package commands
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 
-	"github.com/port-experimental/port-cli/internal/config"
+	"github.com/port-labs/port-cli/internal/config"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
@@ -57,8 +58,47 @@ func RegisterConfig(rootCmd *cobra.Command) {
 
 	configCmd.AddCommand(registerGet())
 	configCmd.AddCommand(registerSet())
+	configCmd.AddCommand(registerSources())
 
 	rootCmd.AddCommand(configCmd)
+}
+
+func registerSources() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "sources",
+		Short: "Show configuration and environment sources",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			flags := GetGlobalFlags(cmd.Context())
+			configManager := config.NewConfigManager(flags.ConfigFile)
+			cfg, err := configManager.Load()
+			if err != nil {
+				return fmt.Errorf("failed to load configuration: %w", err)
+			}
+
+			fmt.Println("Configuration sources:")
+			fmt.Printf("Config file: %s\n", configManager.ConfigPath())
+			fmt.Printf("Default org: %s\n", cfg.DefaultOrg)
+			fmt.Printf("Env file loading disabled: %t\n", config.EnvFileLoadingDisabled())
+			fmt.Println("Env files checked:")
+			for _, source := range config.EnvFileSources() {
+				status := "missing"
+				if source.Exists {
+					status = "present"
+				}
+				fmt.Printf("  - %s (%s)\n", source.Path, status)
+			}
+			fmt.Println("Environment overrides:")
+			for _, name := range []string{"PORT_CONFIG_FILE", "PORT_CLIENT_ID", "PORT_CLIENT_SECRET", "PORT_API_URL", "PORT_TARGET_CLIENT_ID", "PORT_TARGET_CLIENT_SECRET", "PORT_TARGET_API_URL", "PORT_DEFAULT_ORG", "PORT_NO_ENV_FILE"} {
+				state := "unset"
+				if os.Getenv(name) != "" {
+					state = "set"
+				}
+				fmt.Printf("  - %s: %s\n", name, state)
+			}
+			return nil
+		},
+	}
+	return cmd
 }
 
 // registerGet registers the get command.

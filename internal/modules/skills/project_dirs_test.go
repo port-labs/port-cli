@@ -18,6 +18,12 @@ func TestBuildProjectTargets(t *testing.T) {
 			want:          []string{"/my/repo/.cursor", "/my/repo/.github"},
 		},
 		{
+			name:          "cursor and repo-scoped copilot .github path",
+			globalTargets: []string{"/home/user/.cursor", "/acme/app/.github"},
+			projectDirs:   []string{"/other/repo"},
+			want:          []string{"/other/repo/.cursor", "/other/repo/.github"},
+		},
+		{
 			name:          "multiple project dirs",
 			globalTargets: []string{"/home/user/.copilot"},
 			projectDirs:   []string{"/repo/one", "/repo/two"},
@@ -120,5 +126,35 @@ func TestMergeUnique(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestReplaceManagedTargets_DropsDeselectedKeepsForeign locks in the fix for re-running
+// 'init' and deselecting a tool: the deselected target must be dropped from the saved set
+// (so 'sync' stops writing to it), while a different repository's repo-scoped target is kept.
+func TestReplaceManagedTargets_DropsDeselectedKeepsForeign(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("CURSOR_CONFIG_DIR", "")
+	home := "/home/user"
+	cwd := "/repo"
+
+	managed := TargetPaths(DefaultHookTargets(), home, cwd)
+	cursor := managed[1] // global, home-based
+	claude := managed[2] // global, home-based
+	foreign := "/otherrepo/.github"
+
+	// Previously configured: Cursor + Claude + another repo's repo-scoped Copilot dir.
+	saved := []string{cursor, claude, foreign}
+	// Re-running init now selects only Claude.
+	got := replaceManagedTargets(saved, []string{claude}, home, cwd)
+
+	if contains(got, cursor) {
+		t.Errorf("deselected target %q should be dropped, got %v", cursor, got)
+	}
+	if !contains(got, claude) {
+		t.Errorf("selected target %q should be kept, got %v", claude, got)
+	}
+	if !contains(got, foreign) {
+		t.Errorf("foreign repo-scoped target %q should be preserved, got %v", foreign, got)
 	}
 }

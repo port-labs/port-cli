@@ -3,10 +3,11 @@ package commands
 import (
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 
-	"github.com/port-experimental/port-cli/internal/config"
-	"github.com/port-experimental/port-cli/internal/modules/compare"
+	"github.com/port-labs/port-cli/internal/config"
+	"github.com/port-labs/port-cli/internal/modules/compare"
 	"github.com/spf13/cobra"
 )
 
@@ -62,6 +63,10 @@ Examples:
   # CI/CD mode: fail if differences found
   port compare --source staging --target production --fail-on-diff`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := validateStringEnum("--output", outputFormat, []string{"text", "json", "html"}); err != nil {
+				return err
+			}
+
 			flags := GetGlobalFlags(cmd.Context())
 			configManager := config.NewConfigManager(flags.ConfigFile)
 
@@ -93,12 +98,16 @@ Examples:
 					"blueprints": true, "actions": true, "scorecards": true,
 					"pages": true, "integrations": true, "teams": true, "users": true,
 					"automations": true, "blueprint-permissions": true, "action-permissions": true,
-					"entities": true,
+					"page-permissions": true, "entities": true,
 				}
 				for _, r := range includeList {
 					if !validResources[r] {
-						return fmt.Errorf("invalid resource: %s. Valid resources: blueprints, actions, automations, scorecards, pages, integrations, teams, users, blueprint-permissions, action-permissions, entities", r)
+						return fmt.Errorf("invalid resource: %s. Valid resources: blueprints, actions, automations, scorecards, pages, integrations, teams, users, blueprint-permissions, action-permissions, page-permissions, entities", r)
 					}
+				}
+
+				if slices.Contains(includeList, "page-permissions") && !slices.Contains(includeList, "pages") {
+					return fmt.Errorf("page-permissions requires pages to also be included (add 'pages' to --include)")
 				}
 			}
 

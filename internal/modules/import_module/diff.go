@@ -7,8 +7,9 @@ import (
 	"reflect"
 	"sort"
 
-	"github.com/port-experimental/port-cli/internal/api"
-	"github.com/port-experimental/port-cli/internal/modules/export"
+	"github.com/port-labs/port-cli/internal/api"
+	"github.com/port-labs/port-cli/internal/modules/export"
+	systemblueprints "github.com/port-labs/port-cli/internal/modules/system_blueprints"
 )
 
 // PermissionsChange represents a permissions update for a single resource.
@@ -44,6 +45,7 @@ type DiffResult struct {
 	IntegrationsToSkip   []api.Integration
 	BlueprintPermissions []PermissionsChange
 	ActionPermissions    []PermissionsChange
+	PagePermissions      []PermissionsChange
 }
 
 // DiffComparer compares import data with current organization state.
@@ -78,9 +80,16 @@ func (d *DiffComparer) Compare(ctx context.Context, importData *export.Data, opt
 	result.PagesToCreate, result.PagesToUpdate, result.PagesToSkip = d.comparePages(importData.Pages, currentData.Pages, opts.IncludeResources)
 	result.IntegrationsToUpdate, result.IntegrationsToSkip = d.compareIntegrations(importData.Integrations, currentData.Integrations, opts.IncludeResources)
 
-	// Compare permissions (always included when present in import data)
-	result.BlueprintPermissions = comparePermissions(currentData.BlueprintPermissions, importData.BlueprintPermissions)
-	result.ActionPermissions = comparePermissions(currentData.ActionPermissions, importData.ActionPermissions)
+	// Compare permissions when included (or when no --include filter is set)
+	if shouldImport("blueprint-permissions", opts.IncludeResources) {
+		result.BlueprintPermissions = comparePermissions(currentData.BlueprintPermissions, importData.BlueprintPermissions)
+	}
+	if shouldImport("action-permissions", opts.IncludeResources) {
+		result.ActionPermissions = comparePermissions(currentData.ActionPermissions, importData.ActionPermissions)
+	}
+	if shouldImport("page-permissions", opts.IncludeResources) {
+		result.PagePermissions = comparePermissions(currentData.PagePermissions, importData.PagePermissions)
+	}
 
 	return result, nil
 }
@@ -89,9 +98,12 @@ func (d *DiffComparer) Compare(ctx context.Context, importData *export.Data, opt
 func (d *DiffComparer) exportCurrentState(ctx context.Context, opts Options) (*export.Data, error) {
 	collector := export.NewCollector(d.client)
 	exportOpts := export.Options{
-		Blueprints:       nil, // Export all
-		SkipEntities:     opts.SkipEntities,
-		IncludeResources: opts.IncludeResources,
+		Blueprints:             nil, // Export all
+		SkipEntities:           opts.SkipEntities,
+		IncludeRuleResults:     opts.IncludeRuleResults,
+		IncludeResources:       opts.IncludeResources,
+		ExcludeBlueprints:      opts.ExcludeBlueprints,
+		ExcludeBlueprintSchema: opts.ExcludeBlueprintSchema,
 	}
 	return collector.Collect(ctx, exportOpts)
 }
@@ -205,8 +217,11 @@ func (d *DiffComparer) compareBlueprints(importBPs, currentBPs []api.Blueprint, 
 			continue
 		}
 
-		// Skip Port-managed blueprints that cannot be modified directly
-		if portManagedBlueprints[identifier] {
+		isSystemPatch := systemblueprints.IsCustomPatch(bp)
+
+		// Skip Port-managed blueprints that cannot be modified directly, unless
+		// the input is a minimal custom-property patch.
+		if portManagedBlueprints[identifier] && !isSystemPatch {
 			skip = append(skip, bp)
 			continue
 		}
@@ -217,7 +232,15 @@ func (d *DiffComparer) compareBlueprints(importBPs, currentBPs []api.Blueprint, 
 
 		currentBP, exists := currentMap[identifier]
 		if !exists {
+			if isSystemPatch || systemblueprints.PrefersPatchUpdate(identifier) {
+				update = append(update, bp)
+				continue
+			}
 			create = append(create, bp)
+		} else if isSystemPatch && !systemblueprints.CustomPatchEqual(bp, currentBP) {
+			update = append(update, bp)
+		} else if isSystemPatch {
+			skip = append(skip, bp)
 		} else if !resourcesEqual(bp, currentBP, []string{"createdBy", "updatedBy", "createdAt", "updatedAt", "id"}) {
 			update = append(update, bp)
 		} else {
@@ -304,7 +327,7 @@ func (d *DiffComparer) compareScorecards(importScs, currentScs []api.Scorecard, 
 
 // compareActions compares import actions with current actions.
 func (d *DiffComparer) compareActions(importActs, currentActs []api.Action, includeResources []string) (create, update, skip []api.Action) {
-	if !shouldImport("actions", includeResources) {
+	if !shouldImport("actions", includeResources) && !shouldImport("automations", includeResources) {
 		return nil, nil, nil
 	}
 
@@ -504,7 +527,12 @@ func (d *DiffComparer) compareIntegrations(importInts, currentInts []api.Integra
 func comparePermissions(current, desired map[string]api.Permissions) []PermissionsChange {
 	var changes []PermissionsChange
 	for id, desiredPerms := range desired {
-		if currentPerms, exists := current[id]; !exists || !reflect.DeepEqual(currentPerms, desiredPerms) {
+		currentPerms, exists := current[id]
+		if !exists || !resourcesEqual(
+			map[string]interface{}(desiredPerms),
+			map[string]interface{}(currentPerms),
+			nil,
+		) {
 			changes = append(changes, PermissionsChange{Identifier: id, Permissions: desiredPerms})
 		}
 	}

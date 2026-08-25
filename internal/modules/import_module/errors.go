@@ -117,6 +117,8 @@ func CategorizeError(err error, resourceType, resourceID string) *ImportError {
 		"relation target",
 		"invalid relation",
 		"blueprint with identifier",
+		"after_item_not_in_parent",
+		"is not in the parent folder",
 	}) {
 		ie.Category = ErrDependency
 		ie.Retryable = true

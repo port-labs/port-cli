@@ -7,18 +7,49 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"time"
 
-	"github.com/port-experimental/port-cli/internal/auth"
-	"github.com/port-experimental/port-cli/internal/useragent"
+	"github.com/port-labs/port-cli/internal/auth"
+	"github.com/port-labs/port-cli/internal/useragent"
 )
 
 const (
-	maxRetries      = 3
-	baseRetryDelay  = 100 * time.Millisecond
-	maxRetryDelay   = 5 * time.Second
-	retryableStatus = 429 // Too Many Requests
+	maxRetries       = 5
+	baseRetryDelay   = 100 * time.Millisecond
+	maxRetryDelay    = 5 * time.Second
+	maxRateLimitWait = 120 * time.Second // cap for Retry-After
 )
+
+// APIError represents a non-2xx response from the Port API.
+type APIError struct {
+	Method     string
+	URL        string
+	Status     string
+	StatusCode int
+	Body       string
+	Code       string
+	Message    string
+	Details    map[string]interface{}
+}
+
+func (e *APIError) Error() string {
+	if e == nil {
+		return ""
+	}
+	if e.Body != "" {
+		return fmt.Sprintf("API request to %s %s failed: %s. Body: %s", e.URL, e.Method, e.Status, e.Body)
+	}
+	return fmt.Sprintf("API request to %s %s failed: %s", e.URL, e.Method, e.Status)
+}
+
+var retryableStatuses = map[int]bool{
+	http.StatusTooManyRequests:     true,
+	http.StatusInternalServerError: true,
+	http.StatusBadGateway:          true,
+	http.StatusServiceUnavailable:  true,
+	http.StatusGatewayTimeout:      true,
+}
 
 // Client handles authenticated requests to Port's API.
 type Client struct {
@@ -141,31 +172,34 @@ func (c *Client) request(ctx context.Context, method, path string, data any, par
 
 	url := fmt.Sprintf("%s%s", c.apiURL, path)
 
-	var reqBody io.Reader
+	var jsonData []byte
 	if data != nil {
-		jsonData, err := json.Marshal(data)
+		jsonData, err = json.Marshal(data)
 		if err != nil {
 			return nil, fmt.Errorf("failed to marshal request body: %w", err)
 		}
-		reqBody = bytes.NewBuffer(jsonData)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, method, url, reqBody)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", token))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", useragent.String())
-
-	// Add query parameters
-	if params != nil {
-		q := req.URL.Query()
-		for k, v := range params {
-			q.Set(k, v)
+	newRequest := func() (*http.Request, error) {
+		var reqBody io.Reader
+		if jsonData != nil {
+			reqBody = bytes.NewReader(jsonData)
 		}
-		req.URL.RawQuery = q.Encode()
+		req, err := http.NewRequestWithContext(ctx, method, url, reqBody)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create request: %w", err)
+		}
+		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", token))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("User-Agent", useragent.String())
+		if params != nil {
+			q := req.URL.Query()
+			for k, v := range params {
+				q.Set(k, v)
+			}
+			req.URL.RawQuery = q.Encode()
+		}
+		return req, nil
 	}
 
 	var resp *http.Response
@@ -173,19 +207,20 @@ func (c *Client) request(ctx context.Context, method, path string, data any, par
 	// Retry logic with exponential backoff
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		if attempt > 0 {
-			// Calculate exponential backoff delay
 			delay := baseRetryDelay * time.Duration(1<<uint(attempt-1))
 			if delay > maxRetryDelay {
 				delay = maxRetryDelay
 			}
-
-			// Check if context is cancelled
 			select {
 			case <-ctx.Done():
 				return nil, ctx.Err()
 			case <-time.After(delay):
-				// Continue with retry
 			}
+		}
+
+		req, err := newRequest()
+		if err != nil {
+			return nil, err
 		}
 
 		resp, err = c.httpClient.Do(req)
@@ -197,10 +232,15 @@ func (c *Client) request(ctx context.Context, method, path string, data any, par
 			continue
 		}
 
-		// Check if status code is retryable (429 Too Many Requests)
-		if resp.StatusCode == retryableStatus && attempt < maxRetries {
+		// Check if status code is retryable.
+		if retryableStatuses[resp.StatusCode] && attempt < maxRetries {
+			delay := retryAfterDelay(resp, attempt)
 			resp.Body.Close()
-			// Retry on rate limit
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(delay):
+			}
 			continue
 		}
 
@@ -208,14 +248,27 @@ func (c *Client) request(ctx context.Context, method, path string, data any, par
 		if resp.StatusCode >= 400 {
 			body, _ := io.ReadAll(resp.Body)
 			resp.Body.Close()
-
-			// Create more descriptive error message
-			statusText := resp.Status
 			bodyStr := string(body)
-			if bodyStr != "" {
-				return nil, fmt.Errorf("API request to %s %s failed: %s. Body: %s", url, method, statusText, bodyStr)
+			apiErr := &APIError{
+				Method:     method,
+				URL:        url,
+				Status:     resp.Status,
+				StatusCode: resp.StatusCode,
+				Body:       bodyStr,
 			}
-			return nil, fmt.Errorf("API request to %s %s failed: %s", url, method, statusText)
+			if bodyStr != "" {
+				var parsed struct {
+					Error   string                 `json:"error"`
+					Message string                 `json:"message"`
+					Details map[string]interface{} `json:"details"`
+				}
+				if err := json.Unmarshal(body, &parsed); err == nil {
+					apiErr.Code = parsed.Error
+					apiErr.Message = parsed.Message
+					apiErr.Details = parsed.Details
+				}
+			}
+			return nil, apiErr
 		}
 
 		// Success
@@ -223,6 +276,25 @@ func (c *Client) request(ctx context.Context, method, path string, data any, par
 	}
 
 	return resp, err
+}
+
+// retryAfterDelay returns how long to wait after a 429 response.
+// Reads Retry-After header first; falls back to exponential backoff.
+func retryAfterDelay(resp *http.Response, attempt int) time.Duration {
+	if ra := resp.Header.Get("Retry-After"); ra != "" {
+		if secs, err := strconv.Atoi(ra); err == nil {
+			d := time.Duration(secs) * time.Second
+			if d > maxRateLimitWait {
+				d = maxRateLimitWait
+			}
+			return d
+		}
+	}
+	delay := baseRetryDelay * time.Duration(1<<uint(attempt))
+	if delay > maxRateLimitWait {
+		delay = maxRateLimitWait
+	}
+	return delay
 }
 
 // Close closes the HTTP client (no-op for standard client, but implements closer pattern).

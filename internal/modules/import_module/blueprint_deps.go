@@ -2,9 +2,10 @@ package import_module
 
 import (
 	"regexp"
+	"sort"
 	"strings"
 
-	"github.com/port-experimental/port-cli/internal/api"
+	"github.com/port-labs/port-cli/internal/api"
 )
 
 // DependentFields are blueprint fields that may reference other blueprints.
@@ -530,6 +531,84 @@ func TopologicalSortOwnership(blueprints []api.Blueprint) ([][]api.Blueprint, []
 	}
 
 	return levels, cyclic
+}
+
+// TopologicalSortAggProps sorts blueprint IDs by their cross-blueprint aggregation
+// property dependencies. If blueprint A has an agg prop that targets blueprint B and
+// references a property that is itself an agg prop on B, A must run after B.
+// Returns levels where blueprints in the same level can be applied concurrently.
+func TopologicalSortAggProps(storedAggProps map[string]map[string]interface{}) [][]string {
+	// Build set of agg prop names per blueprint
+	aggPropNames := make(map[string]map[string]bool, len(storedAggProps))
+	for id, aggProps := range storedAggProps {
+		names := make(map[string]bool, len(aggProps))
+		for name := range aggProps {
+			names[name] = true
+		}
+		aggPropNames[id] = names
+	}
+
+	inDegree := make(map[string]int, len(storedAggProps))
+	dependents := make(map[string][]string, len(storedAggProps))
+	for id := range storedAggProps {
+		inDegree[id] = 0
+	}
+
+	for id, aggProps := range storedAggProps {
+		seen := make(map[string]bool)
+		for _, propDefI := range aggProps {
+			def, ok := propDefI.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			target, _ := def["target"].(string)
+			if target == "" || target == id || seen[target] {
+				continue
+			}
+			calcSpec, _ := def["calculationSpec"].(map[string]interface{})
+			if calcSpec == nil {
+				continue
+			}
+			prop, _ := calcSpec["property"].(string)
+			if prop == "" {
+				continue
+			}
+			if aggPropNames[target][prop] {
+				seen[target] = true
+				inDegree[id]++
+				dependents[target] = append(dependents[target], id)
+			}
+		}
+	}
+
+	remaining := make(map[string]bool, len(storedAggProps))
+	for id := range storedAggProps {
+		remaining[id] = true
+	}
+
+	var levels [][]string
+	for len(remaining) > 0 {
+		var ready []string
+		for id := range remaining {
+			if inDegree[id] == 0 {
+				ready = append(ready, id)
+			}
+		}
+		if len(ready) == 0 {
+			for id := range remaining {
+				ready = append(ready, id)
+			}
+		}
+		sort.Strings(ready)
+		levels = append(levels, ready)
+		for _, id := range ready {
+			delete(remaining, id)
+			for _, dep := range dependents[id] {
+				inDegree[dep]--
+			}
+		}
+	}
+	return levels
 }
 
 // FlattenLevels converts leveled blueprints to a flat slice in dependency order.

@@ -2,29 +2,40 @@ package commands
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
-	"github.com/port-experimental/port-cli/internal/config"
-	"github.com/port-experimental/port-cli/internal/modules/export"
-	"github.com/port-experimental/port-cli/internal/output"
+	"github.com/port-labs/port-cli/internal/config"
+	"github.com/port-labs/port-cli/internal/modules/export"
+	"github.com/port-labs/port-cli/internal/output"
 	"github.com/spf13/cobra"
 )
 
 // RegisterExport registers the export command.
 func RegisterExport(rootCmd *cobra.Command) {
 	var (
-		outputPath             string
-		org                    string
-		baseOrg                string
-		blueprints             string
-		excludeBlueprints      string
-		excludeBlueprintSchema string
-		format                 string
-		skipEntities           bool
-		skipSystemBlueprints   bool
-		includeRuleResults     bool
-		include                string
-		outputFormat           string
+		outputPath                    string
+		org                           string
+		baseOrg                       string
+		blueprints                    string
+		excludeBlueprints             string
+		excludeBlueprintSchema        string
+		format                        string
+		skipEntities                  bool
+		skipSystemBlueprints          bool
+		skipSystemBlueprintProperties bool
+		includeRuleResults            bool
+		include                       string
+		outputFormat                  string
+		maxErrors                     int
+
+		scorecards   string
+		actions      string
+		pages        string
+		integrations string
+		teams        string
+		users        string
+		entities     string
 	)
 
 	exportCmd := &cobra.Command{
@@ -36,6 +47,15 @@ Exports blueprints, entities, scorecards, actions, and teams to a file.
 Use --skip-entities to only export configuration without entity data.
 Use --include to selectively export specific resource types.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := validateStringEnum("--output-format", outputFormat, []string{"text", "json"}); err != nil {
+				return err
+			}
+			if format != "" {
+				if err := validateStringEnum("--format", format, []string{"tar", "json"}); err != nil {
+					return err
+				}
+			}
+
 			flags := GetGlobalFlags(cmd.Context())
 			configManager := config.NewConfigManager(flags.ConfigFile)
 
@@ -58,6 +78,9 @@ Use --include to selectively export specific resource types.`,
 
 			if baseOrgConfig == nil {
 				return fmt.Errorf("base organization configuration not found")
+			}
+			if err := validateMaxErrorsFlag(maxErrors); err != nil {
+				return err
 			}
 
 			orgConfig := baseOrgConfig
@@ -89,6 +112,25 @@ Use --include to selectively export specific resource types.`,
 				}
 			}
 
+			// Parse per-resource ID filters
+			parseCSV := func(s string) []string {
+				if s == "" {
+					return nil
+				}
+				parts := strings.Split(s, ",")
+				for i := range parts {
+					parts[i] = strings.TrimSpace(parts[i])
+				}
+				return parts
+			}
+			entityList := parseCSV(entities)
+			scorecardList := parseCSV(scorecards)
+			actionList := parseCSV(actions)
+			pageList := parseCSV(pages)
+			integrationList := parseCSV(integrations)
+			teamList := parseCSV(teams)
+			userList := parseCSV(users)
+
 			// Parse include list
 			var includeList []string
 			if include != "" {
@@ -110,12 +152,20 @@ Use --include to selectively export specific resource types.`,
 					"integrations":          true,
 					"blueprint-permissions": true,
 					"action-permissions":    true,
+					"page-permissions":      true,
 				}
 
 				for _, r := range includeList {
 					if !validResources[r] {
-						return fmt.Errorf("invalid resource: %s. Valid resources: blueprints, entities, scorecards, actions, teams, users, automations, pages, integrations, blueprint-permissions, action-permissions", r)
+						return fmt.Errorf("invalid resource: %s. Valid resources: blueprints, entities, scorecards, actions, teams, users, automations, pages, integrations, blueprint-permissions, action-permissions, page-permissions", r)
 					}
+				}
+
+				// page-permissions requires pages so that page identifiers can be collected
+				hasPagePerms := slices.Contains(includeList, "page-permissions")
+				hasPages := slices.Contains(includeList, "pages")
+				if hasPagePerms && !hasPages {
+					return fmt.Errorf("page-permissions requires pages to also be included (add 'pages' to --include)")
 				}
 
 				// Handle conflict between skip_entities and include
@@ -144,6 +194,54 @@ Use --include to selectively export specific resource types.`,
 				}
 			}
 
+			// True when the caller explicitly wants blueprint schemas, either via
+			// --blueprints or --include blueprints — as opposed to blueprints only
+			// being pulled in as a byproduct of --actions/--scorecards/--entities.
+			blueprintsExplicitlyRequested := cmd.Flags().Changed("blueprints") || slices.Contains(includeList, "blueprints")
+
+			// Auto-include resource types when per-resource flags are explicitly set
+			// (with or without specific IDs — Changed() detects explicit flag usage)
+			ensureContains := func(list []string, item string) []string {
+				for _, v := range list {
+					if v == item {
+						return list
+					}
+				}
+				return append(list, item)
+			}
+			needBlueprints := false
+			if len(entityList) > 0 || cmd.Flags().Changed("entities") {
+				includeList = ensureContains(includeList, "entities")
+				needBlueprints = true
+			}
+			if len(scorecardList) > 0 || cmd.Flags().Changed("scorecards") {
+				includeList = ensureContains(includeList, "scorecards")
+				needBlueprints = true
+			}
+			if len(actionList) > 0 || cmd.Flags().Changed("actions") {
+				includeList = ensureContains(includeList, "actions")
+				includeList = ensureContains(includeList, "action-permissions")
+				needBlueprints = true
+			}
+			if len(pageList) > 0 || cmd.Flags().Changed("pages") {
+				includeList = ensureContains(includeList, "pages")
+				includeList = ensureContains(includeList, "page-permissions")
+			}
+			if len(integrationList) > 0 || cmd.Flags().Changed("integrations") {
+				includeList = ensureContains(includeList, "integrations")
+			}
+			if len(teamList) > 0 || cmd.Flags().Changed("teams") {
+				includeList = ensureContains(includeList, "teams")
+			}
+			if len(userList) > 0 || cmd.Flags().Changed("users") {
+				includeList = ensureContains(includeList, "users")
+			}
+			// --blueprints also restricts to blueprints resource type, consistent with other per-resource flags
+			if cmd.Flags().Changed("blueprints") || (needBlueprints && len(includeList) > 0) {
+				includeList = ensureContains(includeList, "blueprints")
+			}
+			autoScopeBlueprints := needBlueprints && !blueprintsExplicitlyRequested
+
 			token, err := configManager.GetOrRefreshToken(cmd.Context(), orgName)
 			if err != nil {
 				if !config.ShouldIgnoreGetOrRefreshTokenError(err) {
@@ -164,6 +262,27 @@ Use --include to selectively export specific resource types.`,
 				if len(blueprintList) > 0 {
 					output.Printf("Blueprints filter: %s\n", strings.Join(blueprintList, ", "))
 				}
+				if len(entityList) > 0 {
+					output.Printf("Entities filter: %s\n", strings.Join(entityList, ", "))
+				}
+				if len(scorecardList) > 0 {
+					output.Printf("Scorecards filter: %s\n", strings.Join(scorecardList, ", "))
+				}
+				if len(actionList) > 0 {
+					output.Printf("Actions filter: %s\n", strings.Join(actionList, ", "))
+				}
+				if len(pageList) > 0 {
+					output.Printf("Pages filter: %s\n", strings.Join(pageList, ", "))
+				}
+				if len(integrationList) > 0 {
+					output.Printf("Integrations filter: %s\n", strings.Join(integrationList, ", "))
+				}
+				if len(teamList) > 0 {
+					output.Printf("Teams filter: %s\n", strings.Join(teamList, ", "))
+				}
+				if len(userList) > 0 {
+					output.Printf("Users filter: %s\n", strings.Join(userList, ", "))
+				}
 				if len(includeList) > 0 {
 					output.Printf("Including only: %s\n", strings.Join(includeList, ", "))
 				} else if skipEntities {
@@ -173,15 +292,24 @@ Use --include to selectively export specific resource types.`,
 
 			// Execute export
 			result, err := exportModule.Execute(cmd.Context(), export.Options{
-				OutputPath:             outputPath,
-				Blueprints:             blueprintList,
-				ExcludeBlueprints:      excludeBlueprintList,
-				ExcludeBlueprintSchema: excludeBlueprintSchemaList,
-				Format:                 format,
-				SkipEntities:           skipEntities,
-				SkipSystemBlueprints:   skipSystemBlueprints,
-				IncludeRuleResults:     includeRuleResults,
-				IncludeResources:       includeList,
+				OutputPath:                    outputPath,
+				Blueprints:                    blueprintList,
+				ExcludeBlueprints:             excludeBlueprintList,
+				ExcludeBlueprintSchema:        excludeBlueprintSchemaList,
+				Format:                        format,
+				SkipEntities:                  skipEntities,
+				SkipSystemBlueprints:          skipSystemBlueprints,
+				SkipSystemBlueprintProperties: skipSystemBlueprintProperties,
+				IncludeRuleResults:            includeRuleResults,
+				IncludeResources:              includeList,
+				AutoScopeBlueprints:           autoScopeBlueprints,
+				Entities:                      entityList,
+				Scorecards:                    scorecardList,
+				Actions:                       actionList,
+				Pages:                         pageList,
+				Integrations:                  integrationList,
+				Teams:                         teamList,
+				Users:                         userList,
 			})
 			if err != nil {
 				if outputFormat == "json" {
@@ -209,16 +337,12 @@ Use --include to selectively export specific resource types.`,
 
 			// Output in JSON format if requested
 			if outputFormat == "json" {
-				jsonData := map[string]interface{}{
-					"output_path":        result.OutputPath,
-					"blueprints_count":   result.BlueprintsCount,
-					"entities_count":     result.EntitiesCount,
-					"actions_count":      result.ActionsCount,
-					"users_count":        result.UsersCount,
-					"teams_count":        result.TeamsCount,
-					"pages_count":        result.PagesCount,
-					"integrations_count": result.IntegrationsCount,
-				}
+				jsonData := exportJSONSummary(result, exportJSONSummaryOptions{
+					SkipEntities:             skipEntities,
+					IncludedResources:        includeList,
+					ExcludedBlueprints:       excludeBlueprintList,
+					SchemaExcludedBlueprints: excludeBlueprintSchemaList,
+				})
 				if len(result.TimeoutErrors) > 0 {
 					jsonData["timeout_errors"] = result.TimeoutErrors
 					jsonData["warnings"] = fmt.Sprintf("%d blueprint(s) timed out during export", len(result.TimeoutErrors))
@@ -243,10 +367,14 @@ Use --include to selectively export specific resource types.`,
 			output.Printf("Integrations: %d\n", result.IntegrationsCount)
 
 			// Display timeout warnings if any
-			if len(result.TimeoutErrors) > 0 {
+			if len(result.TimeoutErrors) > 0 && shouldPrintErrors(len(result.TimeoutErrors), maxErrors) {
 				output.WarningPrintln("\n⚠ Warning: Some blueprints timed out during export:")
-				for _, timeoutErr := range result.TimeoutErrors {
-					output.WarningPrintf("  - %s\n", timeoutErr)
+				limit := errorLimit(len(result.TimeoutErrors), maxErrors)
+				for i := 0; i < limit; i++ {
+					output.WarningPrintf("  - %s\n", result.TimeoutErrors[i])
+				}
+				if len(result.TimeoutErrors) > limit {
+					output.WarningPrintf("  ... and %d more\n", len(result.TimeoutErrors)-limit)
 				}
 				output.WarningPrintln("These blueprints were skipped. Consider exporting them separately or contact Port support if this persists.")
 			}
@@ -259,15 +387,25 @@ Use --include to selectively export specific resource types.`,
 	exportCmd.MarkFlagRequired("output")
 	exportCmd.Flags().StringVar(&org, "org", "", "Base organization name (uses default if not specified, deprecated: use --base-org)")
 	exportCmd.Flags().StringVar(&baseOrg, "base-org", "", "Base organization name (uses default if not specified)")
-	exportCmd.Flags().StringVarP(&blueprints, "blueprints", "b", "", "Comma-separated list of blueprint IDs to export (exports all if not specified)")
+	exportCmd.Flags().StringVarP(&blueprints, "blueprints", "b", "", "Comma-separated list of blueprint IDs to export (restricts export to blueprints resource type; exports all blueprints if flag set without IDs; pass this flag explicitly to export the full blueprint set even when combined with --actions/--scorecards/--entities)")
 	exportCmd.Flags().StringVar(&excludeBlueprints, "exclude-blueprints", "", "Comma-separated blueprint IDs to exclude entirely (schema + entities + scorecards + actions)")
 	exportCmd.Flags().StringVar(&excludeBlueprintSchema, "exclude-blueprint-schema", "", "Comma-separated blueprint IDs to exclude schema only (entities, scorecards, actions still exported)")
 	exportCmd.Flags().StringVarP(&format, "format", "f", "", "Export format: tar (tar.gz) or json")
 	exportCmd.Flags().BoolVar(&skipEntities, "skip-entities", false, "Skip exporting entities (only export schema and configuration)")
 	exportCmd.Flags().BoolVar(&skipSystemBlueprints, "skip-system-blueprints", false, "Skip system blueprint schemas (identifiers starting with _) and their entities")
-	exportCmd.Flags().BoolVar(&includeRuleResults, "include-rule-results", false, "Include the _rule_result system blueprint and its entities (excluded by default)")
+	exportCmd.Flags().BoolVar(&skipSystemBlueprintProperties, "skip-system-blueprint-properties", false, "When used with --skip-system-blueprints, do not export custom properties on known system blueprints")
+	exportCmd.Flags().BoolVar(&includeRuleResults, "include-rule-results", true, "Include _rule_result system blueprint entities (use --include-rule-results=false to exclude)")
 	exportCmd.Flags().StringVar(&include, "include", "", "Comma-separated list of resources to export (e.g., 'blueprints,pages'). Available: blueprints, entities, scorecards, actions, teams, users, automations, pages, integrations. If not specified, exports all resources.")
 	exportCmd.Flags().StringVar(&outputFormat, "output-format", "text", "Output format: text or json")
+	exportCmd.Flags().IntVar(&maxErrors, "max-errors", defaultMaxErrors, "Maximum number of errors to show in text output (-1 hides errors, 0 shows all)")
+
+	exportCmd.Flags().StringVar(&scorecards, "scorecards", "", "Comma-separated scorecard IDs to export (restricts export to scorecards resource type; blueprint schemas exported alongside are scoped to only the blueprints the selected scorecards belong to — use --blueprints to export the full set instead)")
+	exportCmd.Flags().StringVar(&actions, "actions", "", "Comma-separated action IDs to export (restricts export to actions resource type; exports all actions if flag set without IDs; blueprint schemas exported alongside are scoped to only the blueprints the selected actions belong to — use --blueprints to export the full set instead)")
+	exportCmd.Flags().StringVar(&pages, "pages", "", "Comma-separated page IDs to export (restricts export to pages resource type)")
+	exportCmd.Flags().StringVar(&integrations, "integrations", "", "Comma-separated integration IDs to export (restricts export to integrations resource type; exports integration mapping only)")
+	exportCmd.Flags().StringVar(&teams, "teams", "", "Comma-separated team names to export (restricts export to teams resource type)")
+	exportCmd.Flags().StringVar(&users, "users", "", "Comma-separated user emails to export (restricts export to users resource type)")
+	exportCmd.Flags().StringVar(&entities, "entities", "", "Comma-separated entity IDs to export (restricts export to entities resource type; blueprint schemas exported alongside are scoped to only the blueprints the selected entities belong to — use --blueprints to export the full set instead)")
 
 	rootCmd.AddCommand(exportCmd)
 }

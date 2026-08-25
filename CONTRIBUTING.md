@@ -6,7 +6,7 @@ Thank you for your interest in contributing to Port CLI! This document provides 
 
 ### Prerequisites
 
-- **Go 1.21+**: Required for the Go CLI
+- **Go 1.25.9+**: Required for the Go CLI
 - **Make**: For build automation
 
 ### Getting Started
@@ -14,7 +14,7 @@ Thank you for your interest in contributing to Port CLI! This document provides 
 1. **Clone the repository**
 
 ```bash
-git clone https://github.com/port-experimental/port-cli.git
+git clone https://github.com/port-labs/port-cli.git
 cd port-cli
 ```
 

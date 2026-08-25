@@ -2,7 +2,7 @@
 package compare
 
 import (
-	"github.com/port-experimental/port-cli/internal/modules/export"
+	"github.com/port-labs/port-cli/internal/modules/export"
 )
 
 // Options represents compare options.

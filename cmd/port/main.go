@@ -4,15 +4,16 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
+	"io"
 	"os"
 	"runtime"
 	"runtime/debug"
 
 	"charm.land/fang/v2"
 	"charm.land/lipgloss/v2"
-	"github.com/port-experimental/port-cli/internal/commands"
-	"github.com/port-experimental/port-cli/internal/output"
-	"github.com/port-experimental/port-cli/internal/styles"
+	"github.com/port-labs/port-cli/internal/commands"
+	"github.com/port-labs/port-cli/internal/output"
+	"github.com/port-labs/port-cli/internal/styles"
 	"github.com/spf13/cobra"
 )
 
@@ -89,8 +90,11 @@ Credentials can be provided via:
 		targetAPIURL       string
 		debug              bool
 		noColor            bool
+		jsonErrors         bool
 		quiet              bool
 		verbose            bool
+		yes                bool
+		noEnvFile          bool
 	)
 
 	rootCmd.PersistentFlags().StringVarP(&configFile, "config", "c", "", "Path to configuration file")
@@ -103,8 +107,12 @@ Credentials can be provided via:
 	rootCmd.PersistentFlags().BoolVarP(&debug, "debug", "d", false, "Enable debug mode")
 	rootCmd.PersistentFlags().MarkHidden("debug")
 	rootCmd.PersistentFlags().BoolVar(&noColor, "no-color", false, "Disable color output")
+	rootCmd.PersistentFlags().BoolVar(&jsonErrors, "json-errors", false, "Print command errors as structured JSON")
 	rootCmd.PersistentFlags().BoolVarP(&quiet, "quiet", "q", false, "Suppress non-error output")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose output")
+	rootCmd.PersistentFlags().BoolVarP(&yes, "yes", "y", false, "Skip confirmation prompts")
+	rootCmd.PersistentFlags().BoolVar(&noEnvFile, "no-env-file", false, "Do not load .env files from the current directory or ~/.port")
+	rootCmd.PersistentFlags().Bool(commands.TreeFlagName, false, "Print the full command tree for this command and exit")
 
 	// Store global flags in context and initialize color output
 	rootCmd.PersistentPreRun = func(cmd *cobra.Command, args []string) {
@@ -112,6 +120,10 @@ Credentials can be provided via:
 		output.Init(noColor)
 
 		// Initialize verbosity
+		if noEnvFile {
+			os.Setenv("PORT_NO_ENV_FILE", "1")
+		}
+
 		if quiet {
 			output.SetVerbosity(output.QuietLevel)
 		} else if verbose {
@@ -132,6 +144,8 @@ Credentials can be provided via:
 			NoColor:            noColor,
 			Quiet:              quiet,
 			Verbose:            verbose,
+			Yes:                yes,
+			NoEnvFile:          noEnvFile,
 		}))
 	}
 
@@ -146,8 +160,22 @@ Credentials can be provided via:
 	commands.RegisterVersion(rootCmd)
 	commands.RegisterConfig(rootCmd)
 	commands.RegisterCompletion(rootCmd)
+	commands.RegisterDocs(rootCmd)
 	commands.RegisterSkills(rootCmd)
 	commands.RegisterCache(rootCmd)
+
+	showTargetFlags := len(os.Args) > 1 && (os.Args[1] == "import" || os.Args[1] == "migrate" || os.Args[1] == "compare")
+	for _, name := range []string{"target-client-id", "target-client-secret", "target-api-url"} {
+		if flag := rootCmd.PersistentFlags().Lookup(name); flag != nil {
+			flag.Hidden = !showTargetFlags
+		}
+	}
+
+	if commands.HasTreeFlag(os.Args[1:]) {
+		target := commands.ResolveTreeTarget(rootCmd, os.Args[1:])
+		commands.PrintCommandTree(os.Stdout, target)
+		return
+	}
 
 	themeFunc := fang.WithColorSchemeFunc(func(
 		ld lipgloss.LightDarkFunc,
@@ -162,15 +190,27 @@ Credentials can be provided via:
 		return def
 	})
 
+	errorHandler := fang.WithErrorHandler(func(w io.Writer, styles fang.Styles, err error) {
+		if jsonErrors {
+			return
+		}
+		fang.DefaultErrorHandler(w, styles, err)
+	})
+
 	if err := fang.Execute(
 		context.Background(),
 		rootCmd,
 		themeFunc,
+		errorHandler,
 		fang.WithVersion(version),
 		fang.WithCommit(commit),
 		fang.WithNotifySignal(os.Interrupt)); err != nil {
-		output.Init(false)
+		output.Init(noColor)
 		output.SetVerbosity(output.NormalLevel)
+		if jsonErrors {
+			_ = output.PrintJSONError(err)
+			os.Exit(1)
+		}
 		formattedErr := output.FormatError(err)
 		if formattedErr != "" {
 			output.ErrorPrintf("%s\n", formattedErr)

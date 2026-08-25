@@ -5,8 +5,8 @@ import (
 	"reflect"
 	"sort"
 
-	"github.com/port-experimental/port-cli/internal/api"
-	"github.com/port-experimental/port-cli/internal/modules/export"
+	"github.com/port-labs/port-cli/internal/api"
+	"github.com/port-labs/port-cli/internal/modules/export"
 )
 
 // ExcludedFields contains fields to exclude from comparison.
@@ -46,7 +46,7 @@ func (d *Differ) Diff(source, target *export.Data, include []string) *CompareRes
 	if shouldInclude("blueprints", include) {
 		result.Blueprints = d.diffBlueprints(source.Blueprints, target.Blueprints)
 	}
-	if shouldInclude("actions", include) {
+	if shouldInclude("actions", include) || shouldInclude("automations", include) {
 		result.Actions = d.diffActions(source.Actions, target.Actions)
 	}
 	if shouldInclude("scorecards", include) {

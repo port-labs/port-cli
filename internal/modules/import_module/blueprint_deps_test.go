@@ -3,7 +3,7 @@ package import_module
 import (
 	"testing"
 
-	"github.com/port-experimental/port-cli/internal/api"
+	"github.com/port-labs/port-cli/internal/api"
 )
 
 func TestStripDependentFields(t *testing.T) {
@@ -434,6 +434,85 @@ func TestFlattenLevels(t *testing.T) {
 		if bp["identifier"] != expected[i] {
 			t.Errorf("position %d: expected %s, got %s", i, expected[i], bp["identifier"])
 		}
+	}
+}
+
+func TestTopologicalSortAggProps(t *testing.T) {
+	// businessApplication.codeQualityBugs → component.codeQualityBugs
+	// component.codeQualityBugs → sonarQubeProject.numberOfBugs (schema prop, not in storedAggProps)
+	// Expected: component before businessApplication
+	storedAggProps := map[string]map[string]interface{}{
+		"businessApplication": {
+			"codeQualityBugs": map[string]interface{}{
+				"target": "component",
+				"calculationSpec": map[string]interface{}{
+					"calculationBy": "property",
+					"property":      "codeQualityBugs",
+				},
+			},
+		},
+		"component": {
+			"codeQualityBugs": map[string]interface{}{
+				"target": "sonarQubeProject",
+				"calculationSpec": map[string]interface{}{
+					"calculationBy": "property",
+					"property":      "numberOfBugs",
+				},
+			},
+		},
+		"snykTarget": {
+			"scaCriticalOpenVulnerabilities": map[string]interface{}{
+				"target": "snykProject",
+				"calculationSpec": map[string]interface{}{
+					"calculationBy": "property",
+					"property":      "criticalOpenVulnerabilities",
+				},
+			},
+		},
+	}
+
+	levels := TopologicalSortAggProps(storedAggProps)
+
+	// component and snykTarget have no cross-agg-prop deps → level 1
+	// businessApplication depends on component → level 2
+	if len(levels) != 2 {
+		t.Fatalf("expected 2 levels, got %d: %v", len(levels), levels)
+	}
+
+	level1 := make(map[string]bool)
+	for _, id := range levels[0] {
+		level1[id] = true
+	}
+	if !level1["component"] {
+		t.Error("component should be in level 1 (no cross-agg-prop deps)")
+	}
+	if !level1["snykTarget"] {
+		t.Error("snykTarget should be in level 1 (no cross-agg-prop deps)")
+	}
+	if level1["businessApplication"] {
+		t.Error("businessApplication should NOT be in level 1 (depends on component)")
+	}
+
+	level2 := make(map[string]bool)
+	for _, id := range levels[1] {
+		level2[id] = true
+	}
+	if !level2["businessApplication"] {
+		t.Error("businessApplication should be in level 2")
+	}
+}
+
+func TestTopologicalSortAggProps_NoDeps(t *testing.T) {
+	storedAggProps := map[string]map[string]interface{}{
+		"a": {"count": map[string]interface{}{"target": "x", "calculationSpec": map[string]interface{}{"property": "p"}}},
+		"b": {"count": map[string]interface{}{"target": "y", "calculationSpec": map[string]interface{}{"property": "q"}}},
+	}
+	levels := TopologicalSortAggProps(storedAggProps)
+	if len(levels) != 1 {
+		t.Fatalf("expected 1 level (no deps), got %d", len(levels))
+	}
+	if len(levels[0]) != 2 {
+		t.Fatalf("expected both blueprints in level 1, got %v", levels[0])
 	}
 }
 

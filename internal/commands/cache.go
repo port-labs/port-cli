@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	"charm.land/lipgloss/v2"
-	"github.com/port-experimental/port-cli/internal/styles"
+	"github.com/port-labs/port-cli/internal/styles"
 	"github.com/spf13/cobra"
 )
 
@@ -26,11 +26,11 @@ func registerCacheClear() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "clear",
-		Short: "Remove everything Port CLI installed locally (hooks, skill files, and config)",
+		Short: "Remove Port CLI local hooks, skill files, and skills config",
 		Long: `Remove everything that Port CLI has installed or cached locally:
 
   • Port hook entries from hooks.json / settings.json (other hooks are preserved)
-  • Locally synced skills directories (skills/port/)
+  • Locally synced Port-managed skills
   • The skills section from ~/.port/config.yaml
 
 This is a full cleanup — use 'port skills clear' if you only want to delete
@@ -70,7 +70,7 @@ Use --force to skip the confirmation prompt.`,
 				lipgloss.Printf("%s Skipped %s (no hook file found)\n", styles.QuestionMark, t)
 			}
 			for _, t := range result.SkillsResult.DeletedTargets {
-				lipgloss.Printf("%s Deleted skills/port/ from %s\n", styles.CheckMark, styles.Bold.Render(t))
+				lipgloss.Printf("%s Deleted Port-managed skills from %s\n", styles.CheckMark, styles.Bold.Render(t))
 			}
 			lipgloss.Printf("%s Skills config cleared.\n", styles.CheckMark)
 			lipgloss.Printf("\n%s Port CLI cache fully cleared.\n", styles.CheckMark)

@@ -1,9 +1,6 @@
 package output
 
-import (
-	"encoding/json"
-	"os"
-)
+import "encoding/json"
 
 // JSONResult represents a structured result for JSON output.
 type JSONResult struct {
@@ -15,7 +12,7 @@ type JSONResult struct {
 
 // PrintJSON prints data as JSON to stdout.
 func PrintJSON(data interface{}) error {
-	encoder := json.NewEncoder(os.Stdout)
+	encoder := json.NewEncoder(outputWriter)
 	encoder.SetIndent("", "  ")
 	return encoder.Encode(data)
 }

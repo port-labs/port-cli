@@ -3,11 +3,11 @@ name: Release
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to release (e.g., v1.0.0)'
+        description: "Version to release (e.g., v1.0.0)"
         required: true
         type: string
 
@@ -27,14 +27,14 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.25.9'
+          go-version: "1.25.9"
           cache: false
 
       - name: Run tests
         run: make test
 
       - name: Run linter
-        run: make lint || true
+        run: make lint
 
       - name: Create tag (workflow_dispatch only)
         if: github.event_name == 'workflow_dispatch'
@@ -59,10 +59,10 @@ jobs:
           path: dist/*
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
-          node-version: '20'
-          registry-url: 'https://registry.npmjs.org'
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
 
       - name: Get version from tag
         id: get_version
@@ -87,7 +87,7 @@ jobs:
           cd npm
           VERSION=$(node -p "require('./package.json').version")
           echo "Publishing version: $VERSION"
-          
+
           # Check if it's a prerelease version (contains -, alpha, beta, rc, etc.)
           if [[ "$VERSION" =~ -[a-zA-Z] ]] || [[ "$VERSION" =~ (alpha|beta|rc|test|dev) ]]; then
             echo "Detected prerelease version, using --tag beta"
@@ -98,4 +98,3 @@ jobs:
           fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_SECRET }}
-

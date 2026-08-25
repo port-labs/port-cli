@@ -50,9 +50,18 @@ func Banner(info VersionInfo) string {
 		subtitleStyle.Render("Agentic Engineering Platform"),
 	)
 
-	// -- separator (thin line matching logo width) --
-	logoWidth := lipgloss.Width(logo)
-	separator := dimStyle.Render(strings.Repeat("─", logoWidth))
+	// -- overall width --
+	// The tagline can be wider than the logo. Constraining the outer
+	// container to the logo width alone would force the wider lines (and the
+	// padding JoinVertical adds to match them) to wrap, shattering the ASCII
+	// art. Use the widest piece of content so nothing wraps.
+	contentWidth := lipgloss.Width(logo)
+	if w := lipgloss.Width(tagline); w > contentWidth {
+		contentWidth = w
+	}
+
+	// -- separator (thin line spanning the content width) --
+	separator := dimStyle.Render(strings.Repeat("─", contentWidth))
 
 	// -- version details --
 	versionLines := []string{
@@ -75,7 +84,7 @@ func Banner(info VersionInfo) string {
 
 	centered := lipgloss.NewStyle().
 		Align(lipgloss.Center).
-		Width(logoWidth).
+		Width(contentWidth).
 		Render(inner)
 
 	return centered

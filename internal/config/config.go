@@ -32,13 +32,27 @@ type SkillsConfig struct {
 	SelectAllUngrouped bool     `yaml:"select_all_ungrouped"`
 	SelectedGroups     []string `yaml:"selected_groups"`
 	SelectedSkills     []string `yaml:"selected_skills"`
+	IncludeGroups      []string `yaml:"include_groups,omitempty"`
+	ExcludeGroups      []string `yaml:"exclude_groups,omitempty"`
+	TeamGroupDefaults  bool     `yaml:"team_group_defaults,omitempty"`
 	LastSyncedAt       string   `yaml:"last_synced_at"`
 }
 
 // HasSelection reports whether any skill selection has been configured.
 func (p *SkillsConfig) HasSelection() bool {
-	return len(p.Targets) > 0 || p.SelectAll || p.SelectAllGroups ||
-		p.SelectAllUngrouped || len(p.SelectedGroups) > 0 || len(p.SelectedSkills) > 0
+	return len(p.Targets) > 0 || p.HasSkillContentSelection()
+}
+
+// HasSkillContentSelection reports whether group/skill sync filters are configured.
+func (p *SkillsConfig) HasSkillContentSelection() bool {
+	return p.SelectAll || p.SelectAllGroups ||
+		p.SelectAllUngrouped || len(p.SelectedGroups) > 0 || len(p.SelectedSkills) > 0 ||
+		len(p.IncludeGroups) > 0 || len(p.ExcludeGroups) > 0 || p.TeamGroupDefaults
+}
+
+// UsesTeamGroupDefaults reports whether grouped skills are resolved via team defaults on GET /skills.
+func (p *SkillsConfig) UsesTeamGroupDefaults() bool {
+	return p.TeamGroupDefaults || len(p.IncludeGroups) > 0 || len(p.ExcludeGroups) > 0
 }
 
 // Config represents the main configuration structure.
@@ -51,6 +65,9 @@ type Config struct {
 
 // DefaultConfigPath returns the default path to the configuration file.
 func DefaultConfigPath() string {
+	if configFile := os.Getenv("PORT_CONFIG_FILE"); configFile != "" {
+		return configFile
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return ".port/config.yaml"
@@ -76,23 +93,7 @@ func (c *Config) GetOrgConfig(orgName string) (*OrganizationConfig, error) {
 	// If still no org name, try to use the first available org
 	if orgName == "" {
 		if len(c.Organizations) == 0 {
-			return nil, fmt.Errorf(`missing authentication credentials
-
-To authenticate, use one of the following methods:
-
-1. Login with the CLI (recommended):
-   port login --org ORG_NAME
-
-2. CLI flags (recommended for standalone binaries):
-   port export --client-id YOUR_CLIENT_ID --client-secret YOUR_CLIENT_SECRET
-
-3. Environment variables:
-   export PORT_CLIENT_ID="your-client-id"
-   export PORT_CLIENT_SECRET="your-client-secret"
-
-4. Configuration file:
-   Run: port config --init
-   Then edit: %s`, DefaultConfigPath())
+			return nil, fmt.Errorf("%s", MissingAuthCredentialsMessage(DefaultConfigPath()))
 		}
 
 		// Use first organization

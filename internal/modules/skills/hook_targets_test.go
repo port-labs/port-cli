@@ -12,22 +12,42 @@ func TestDefaultHookTargets_ReturnsExpectedTools(t *testing.T) {
 	for i, tg := range targets {
 		names[i] = tg.Name
 	}
-	for _, want := range []string{"Cursor", "Claude Code", "Gemini CLI", "OpenAI Codex", "Windsurf", "GitHub Copilot"} {
+	for _, want := range []string{"Agents (cross-platform)", "Cursor", "Claude Code", "Gemini CLI", "OpenAI Codex", "Windsurf", "GitHub Copilot"} {
 		if !contains(names, want) {
 			t.Errorf("expected %q in default targets", want)
 		}
 	}
 	for _, tg := range targets {
 		switch tg.Name {
+		case "Agents (cross-platform)":
+			if tg.Dir != ".agents" {
+				t.Errorf("Agents Dir: want .agents, got %s", tg.Dir)
+			}
+			if !tg.SkillsOnly {
+				t.Error("Agents should be skills-only (no session hooks)")
+			}
 		case "GitHub Copilot":
-			if tg.Dir != ".copilot" {
-				t.Errorf("GitHub Copilot Dir: want .copilot, got %s", tg.Dir)
+			if tg.Dir != ".github" {
+				t.Errorf("GitHub Copilot Dir: want .github, got %s", tg.Dir)
 			}
-			if tg.ProjectDir != ".github" {
-				t.Errorf("GitHub Copilot ProjectDir: want .github, got %s", tg.ProjectDir)
+			// ProjectDir must stay empty: Copilot is repo-scoped and Dir is already
+			// ".github". extractProjectDirs uses Dir when ProjectDir is unset. The
+			// previous ~/.copilot layout used ProjectDir=".github" only to map the
+			// home skill target onto per-repo .github paths — that indirection is gone.
+			if tg.ProjectDir != "" {
+				t.Errorf("GitHub Copilot ProjectDir: want empty, got %s", tg.ProjectDir)
 			}
-			if tg.RepoScoped {
-				t.Error("GitHub Copilot should not be repo-scoped")
+			if !tg.RepoScoped {
+				t.Error("GitHub Copilot should be repo-scoped")
+			}
+			if tg.HookSubDir != "hooks" {
+				t.Errorf("GitHub Copilot HookSubDir: want hooks, got %s", tg.HookSubDir)
+			}
+			if len(tg.LegacyHookDirs) != 1 || tg.LegacyHookDirs[0] != ".copilot" {
+				t.Errorf("GitHub Copilot LegacyHookDirs: want [.copilot], got %v", tg.LegacyHookDirs)
+			}
+			if tg.Format != hookFormatCopilotJSON {
+				t.Errorf("GitHub Copilot Format: want hookFormatCopilotJSON, got %s", tg.Format)
 			}
 		case "Cursor":
 			if tg.EnvOverride != "CURSOR_CONFIG_DIR" {
@@ -165,10 +185,18 @@ func TestResolveTargetDir(t *testing.T) {
 	}
 }
 
+func TestResolveTargetNames_AgentsPath(t *testing.T) {
+	targets := DefaultHookTargets()
+	names := ResolveTargetNames([]string{filepath.Join("/home/user", ".agents")}, targets)
+	if len(names) != 1 || names[0] != "Agents (cross-platform)" {
+		t.Fatalf("got %v", names)
+	}
+}
+
 func TestResolveTargetNames(t *testing.T) {
 	targets := []HookTarget{
 		{Name: "Cursor", Dir: ".cursor", EnvOverride: "CURSOR_CONFIG_DIR", XDGDir: "cursor"},
-		{Name: "GitHub Copilot", Dir: ".copilot", ProjectDir: ".github"},
+		{Name: "GitHub Copilot", Dir: ".github", RepoScoped: true, HookSubDir: "hooks", LegacyHookDirs: []string{".copilot"}},
 		{Name: "Claude Code", Dir: ".claude"},
 	}
 
@@ -182,6 +210,11 @@ func TestResolveTargetNames(t *testing.T) {
 			name:       "resolves by Dir suffix",
 			savedPaths: []string{"/home/user/.cursor", "/home/user/.copilot"},
 			wantNames:  []string{"Cursor", "GitHub Copilot"},
+		},
+		{
+			name:       "resolves repo-scoped .github path",
+			savedPaths: []string{"/work/acme/.github"},
+			wantNames:  []string{"GitHub Copilot"},
 		},
 		{
 			name:       "no matches returns nil",

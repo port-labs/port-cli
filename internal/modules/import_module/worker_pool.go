@@ -149,9 +149,12 @@ func (bp *BatchProcessor[T]) ProcessWithContext(ctx context.Context, items []T, 
 	return bp.results
 }
 
-// Concurrency limits for different resource types
+// Concurrency limits for different resource types.
+// EntityConcurrency=30 saturates Port's ~33 req/s rate limit ceiling
+// without burning retries (tested against 131k+ entity imports).
 const (
 	BlueprintConcurrency = 5
-	EntityConcurrency    = 20
+	EntityConcurrency    = 30
 	DefaultConcurrency   = 10
+	EntityBulkBatchSize  = 20 // max entities per bulk API call
 )

@@ -44,6 +44,9 @@ dmypy.json
 *.dylib
 bin/
 dist/
+port-darwin-*
+port-linux-*
+port-windows-*
 
 # Test binary, built with `go test -c`
 *.test
@@ -123,3 +126,7 @@ npm/*.tgz
 .worktrees/
 .gstack/
 .snyk
+
+# Locally synced Port skills (managed by `port skills sync` — do not commit)
+.cursor/skills/
+.agents/skills/

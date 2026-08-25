@@ -27,8 +27,6 @@ linters:
     # - wrapcheck
   disable:
     - errcheck
-    - ineffassign
-    - unused
   exclusions:
     generated: lax
     presets:

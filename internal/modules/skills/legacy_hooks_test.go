@@ -72,7 +72,7 @@ func TestRemoveHooks_RemovesLegacyPluginSync_JSON(t *testing.T) {
 	}
 
 	targets := []HookTarget{{Name: "Tool", Dir: "tooldir", Format: hookFormatJSON}}
-	result, err := RemoveHooks(targets, dir, dir)
+	result, err := RemoveHooks(targets, dir, dir, nil)
 	if err != nil {
 		t.Fatalf("RemoveHooks: %v", err)
 	}
@@ -116,7 +116,7 @@ func TestRemoveHooks_RemovesLegacyPluginSync_Claude(t *testing.T) {
 	}
 
 	targets := []HookTarget{{Name: "Claude", Dir: "claudedir", Format: hookFormatClaude}}
-	result, err := RemoveHooks(targets, dir, dir)
+	result, err := RemoveHooks(targets, dir, dir, nil)
 	if err != nil {
 		t.Fatalf("RemoveHooks: %v", err)
 	}
@@ -148,7 +148,7 @@ func TestInstallHooks_ReplacesLegacyPluginSync_JSON(t *testing.T) {
 	}
 
 	targets := []HookTarget{{Name: "Tool", Dir: "tooldir", Format: hookFormatJSON}}
-	if err := InstallHooks(targets, dir, dir); err != nil {
+	if err := InstallHooks(targets, dir, dir, ""); err != nil {
 		t.Fatalf("InstallHooks: %v", err)
 	}
 
@@ -182,7 +182,7 @@ func TestInstallHooks_ReplacesLegacySkillsSync_Claude(t *testing.T) {
 	}
 
 	targets := []HookTarget{{Name: "Claude", Dir: "claudedir", Format: hookFormatClaude}}
-	if err := InstallHooks(targets, dir, dir); err != nil {
+	if err := InstallHooks(targets, dir, dir, ""); err != nil {
 		t.Fatalf("InstallHooks: %v", err)
 	}
 

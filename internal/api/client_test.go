@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -10,8 +11,8 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/port-experimental/port-cli/internal/auth"
-	"github.com/port-experimental/port-cli/internal/useragent"
+	"github.com/port-labs/port-cli/internal/auth"
+	"github.com/port-labs/port-cli/internal/useragent"
 )
 
 func TestTokenManager_GetToken(t *testing.T) {
@@ -220,6 +221,33 @@ func TestClient_request(t *testing.T) {
 	}
 }
 
+func TestClient_request_RetryTransient5xx(t *testing.T) {
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/auth/access_token" {
+			json.NewEncoder(w).Encode(TokenResponse{AccessToken: "test-token", ExpiresIn: 3600})
+			return
+		}
+		attempts++
+		if attempts == 1 {
+			w.WriteHeader(http.StatusBadGateway)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	}))
+	defer server.Close()
+
+	client := NewClient(ClientOpts{ClientID: "test-id", ClientSecret: "test-secret", APIURL: server.URL, Timeout: 0})
+	resp, err := client.request(context.Background(), "POST", "/test", map[string]string{"x": "y"}, nil)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if attempts != 2 {
+		t.Fatalf("expected 2 attempts, got %d", attempts)
+	}
+}
+
 func TestClient_request_Retry(t *testing.T) {
 	attempts := 0
 	// Create a mock server that returns 429 on first attempt
@@ -262,6 +290,46 @@ func TestClient_request_Retry(t *testing.T) {
 
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("Expected status 200 after retry, got %d", resp.StatusCode)
+	}
+}
+
+func TestClientRequestStructuredAPIError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/auth/access_token" {
+			json.NewEncoder(w).Encode(TokenResponse{AccessToken: "test-token", ExpiresIn: 3600})
+			return
+		}
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"ok":      false,
+			"error":   "forbidden_format_change",
+			"message": "Cannot change format",
+			"details": map[string]interface{}{"property": "url"},
+		})
+	}))
+	defer server.Close()
+
+	client := NewClient(ClientOpts{ClientID: "test-id", ClientSecret: "test-secret", APIURL: server.URL, Timeout: 0})
+	_, err := client.request(context.Background(), "PUT", "/blueprints/service", map[string]interface{}{}, nil)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("expected APIError, got %T: %v", err, err)
+	}
+	if apiErr.Code != "forbidden_format_change" {
+		t.Fatalf("Code = %q", apiErr.Code)
+	}
+	if apiErr.Message != "Cannot change format" {
+		t.Fatalf("Message = %q", apiErr.Message)
+	}
+	if apiErr.Details["property"] != "url" {
+		t.Fatalf("Details[property] = %#v", apiErr.Details["property"])
+	}
+	want := "API request to " + server.URL + "/blueprints/service PUT failed: 422 Unprocessable Entity. Body: "
+	if !strings.HasPrefix(err.Error(), want) {
+		t.Fatalf("expected compatible error prefix %q, got %q", want, err.Error())
 	}
 }
 

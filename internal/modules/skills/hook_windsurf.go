@@ -26,13 +26,13 @@ type hookEntry struct {
 	Extras  map[string]interface{} `json:"-"`
 }
 
-func (windsurfHookWriter) Write(dir string) error {
+func (windsurfHookWriter) Write(dir, command string) error {
 	jsonPath := filepath.Join(dir, "hooks.json")
 
 	wf := readWindsurfFile(jsonPath)
 
 	filtered := filterHookEntries(wf.Hooks.PreUserPrompt)
-	filtered = append(filtered, hookEntry{Command: hookCommand})
+	filtered = append(filtered, hookEntry{Command: command})
 	wf.Hooks.PreUserPrompt = filtered
 
 	return writeWindsurfFile(jsonPath, wf)
