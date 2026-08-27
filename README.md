@@ -25,6 +25,12 @@ Use `npm`:
 npm install -g @port-labs/port-cli
 ```
 
+**Verify installation:**
+
+```bash
+port --version
+```
+
 <details>
 <summary><strong>Quick Install Script</strong></summary>
 
@@ -89,12 +95,6 @@ make build
 See [INSTALL.md](INSTALL.md) for detailed installation instructions.
 </details>
 
-**Verify installation:**
-
-```bash
-port --version
-```
-
 ## Quick Start
 
 ### 1. Authenticate
@@ -102,8 +102,8 @@ port --version
 Run `port auth login` which will open a browser for you to log into Port.
 This will generate a short-lived token and allow you to perform actions on behalf of your user.
 
-#### Use Persistent Credentials (Optional)
-
+<details>
+<summary><strong>You can also use persistent credentials</strong></summary>
 You can also authenticate with a client ID + secret combo.
 These do not expire so they are less secure than a token.
 See [Port Secrets docs](https://docs.port.io/platform-administration/secrets-management/port-secrets) for more details.
@@ -127,6 +127,8 @@ export PORT_CLIENT_ID="your-client-id"
 export PORT_CLIENT_SECRET="your-client-secret"
 export PORT_API_URL="https://api.getport.io/v1"
 ```
+
+</details>
 
 ### 2. Run Commands
 
@@ -220,7 +222,10 @@ credentials** (Port application `client_id` + `client_secret`) instead of
 most commands work with either method (OAuth from `port auth login` or
 `client_id` / `client_secret` from config or flags).
 
-**Option A — environment variables** (good for CI and one-off shells):
+<details>
+<summary><strong>Option A — environment variables</strong></summary>
+
+Good for CI and one-off shells
 
 ```bash
 export PORT_CLIENT_ID="your-client-id"
@@ -231,7 +236,12 @@ port export --output backup.tar.gz
 port skills list
 ```
 
-**Option B — `~/.port/.env`** (persistent on your machine, same variable names):
+</details>
+
+<details>
+<summary><strong>Option B — `~/.port/.env`</strong></summary>
+
+Persistent on your machine, same variable names
 
 ```bash
 # ~/.port/.env
@@ -240,7 +250,12 @@ PORT_CLIENT_SECRET=your-client-secret
 PORT_API_URL=http://localhost:3000/v1
 ```
 
-**Option C — config file** (`port config --init`, then edit `~/.port/config.yaml`):
+</details>
+
+<details>
+<summary><strong>Option C — config file</strong></summary>
+
+`port config --init`, then edit `~/.port/config.yaml`
 
 ```yaml
 default_org: default
@@ -252,7 +267,12 @@ organizations:
     api_url: https://api.getport.io/v1
 ```
 
-**Option D — per-command flags** (highest precedence):
+</details>
+
+<details>
+<summary><strong>Option D — per-command flags</strong></summary>
+
+Has the highest precedence.
 
 ```bash
 port api blueprints list \
@@ -264,6 +284,7 @@ port api blueprints list \
 Use the **Client ID** and **Client Secret** from your Port application settings,
 not the organization ID. For EU/US regions, set `api_url` to the matching Port
 API base (see `port auth login --region`).
+</details>
 
 **Non-interactive command flags:** many subcommands accept flags instead of
 prompts (for example `port skills init --tool Cursor --select-all-ungrouped`,
@@ -502,6 +523,6 @@ MIT License - see [LICENSE](LICENSE)
 
 <picture>
   <source media="(prefers-color-scheme: dark)"
-  srcset="./docs/port_logo_black.svg">
-  <img width="300" src="./docs/port_logo_white.svg">
+  srcset="./docs/Port_logo_black.svg">
+  <img width="300" src="./docs/Port_logo_white.svg">
 </picture>
