@@ -310,7 +310,10 @@ func TestClientRequestStructuredAPIError(t *testing.T) {
 	defer server.Close()
 
 	client := NewClient(ClientOpts{ClientID: "test-id", ClientSecret: "test-secret", APIURL: server.URL, Timeout: 0})
-	_, err := client.request(context.Background(), "PUT", "/blueprints/service", map[string]interface{}{}, nil)
+	resp, err := client.request(context.Background(), "PUT", "/blueprints/service", map[string]interface{}{}, nil)
+	if resp != nil {
+		resp.Body.Close()
+	}
 	if err == nil {
 		t.Fatal("expected error")
 	}

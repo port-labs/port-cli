@@ -193,32 +193,6 @@ func (i *Importer) ImportEntitiesFromStream(ctx context.Context, inputPath strin
 	return nil
 }
 
-func (i *Importer) importEntityPartition(
-	ctx context.Context,
-	partition entityPartition,
-	opts Options,
-	result *Result,
-	dryRun bool,
-	inheritedOwnershipBPs map[string]bool,
-	blueprintsToSkip map[string]bool,
-) error {
-	importCtx := &EntityImportContext{
-		InheritedOwnershipBlueprints: inheritedOwnershipBPs,
-		BlueprintsToSkip:             blueprintsToSkip,
-	}
-	return i.ImportBlueprintEntities(
-		ctx,
-		partition.Blueprint,
-		entitystream.JSONLPageIterator(partition.Path, EntityBulkBatchSize),
-		entitystream.FromAPI(i.client),
-		entityStreamOptionsFromImportOptions(opts),
-		result,
-		dryRun,
-		importCtx,
-		filepath.Dir(partition.Path),
-	)
-}
-
 // ImportBlueprintEntities imports one blueprint's desired entities from a page iterator.
 func (i *Importer) ImportBlueprintEntities(
 	ctx context.Context,
