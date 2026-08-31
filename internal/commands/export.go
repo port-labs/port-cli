@@ -11,6 +11,14 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// exportResources defines the resources accepted by the export command.
+// It currently mirrors the shared ValidResources list. To support a different
+// set for export only, replace the right-hand side with a command-specific
+// slice, for example:
+//
+//	var exportResources = []string{"blueprints", "entities", "pages"}
+var exportResources = slices.Clone(ValidResources)
+
 // RegisterExport registers the export command.
 func RegisterExport(rootCmd *cobra.Command) {
 	var (
@@ -139,25 +147,9 @@ Use --include to selectively export specific resource types.`,
 					includeList[i] = strings.TrimSpace(includeList[i])
 				}
 
-				// Validate resource types
-				validResources := map[string]bool{
-					"blueprints":            true,
-					"entities":              true,
-					"scorecards":            true,
-					"actions":               true,
-					"teams":                 true,
-					"users":                 true,
-					"automations":           true,
-					"pages":                 true,
-					"integrations":          true,
-					"blueprint-permissions": true,
-					"action-permissions":    true,
-					"page-permissions":      true,
-				}
-
 				for _, r := range includeList {
-					if !validResources[r] {
-						return fmt.Errorf("invalid resource: %s. Valid resources: blueprints, entities, scorecards, actions, teams, users, automations, pages, integrations, blueprint-permissions, action-permissions, page-permissions", r)
+					if err := ValidateResource(r, exportResources); err != nil {
+						return err
 					}
 				}
 
@@ -395,7 +387,8 @@ Use --include to selectively export specific resource types.`,
 	exportCmd.Flags().BoolVar(&skipSystemBlueprints, "skip-system-blueprints", false, "Skip system blueprint schemas (identifiers starting with _) and their entities")
 	exportCmd.Flags().BoolVar(&skipSystemBlueprintProperties, "skip-system-blueprint-properties", false, "When used with --skip-system-blueprints, do not export custom properties on known system blueprints")
 	exportCmd.Flags().BoolVar(&includeRuleResults, "include-rule-results", true, "Include _rule_result system blueprint entities (use --include-rule-results=false to exclude)")
-	exportCmd.Flags().StringVar(&include, "include", "", "Comma-separated list of resources to export (e.g., 'blueprints,pages'). Available: blueprints, entities, scorecards, actions, teams, users, automations, pages, integrations. If not specified, exports all resources.")
+	validResourcesStr := strings.Join(exportResources, ", ")
+	exportCmd.Flags().StringVar(&include, "include", "", fmt.Sprintf("Comma-separated list of resources to export (e.g., 'blueprints,pages'). Available: %s. If not specified, exports all resources.", validResourcesStr))
 	exportCmd.Flags().StringVar(&outputFormat, "output-format", "text", "Output format: text or json")
 	exportCmd.Flags().IntVar(&maxErrors, "max-errors", defaultMaxErrors, "Maximum number of errors to show in text output (-1 hides errors, 0 shows all)")
 

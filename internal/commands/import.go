@@ -11,6 +11,14 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// importResources defines the resources accepted by the import command.
+// It currently mirrors the shared ValidResources list. To support a different
+// set for import only, replace the right-hand side with a command-specific
+// slice, for example:
+//
+//	var importResources = []string{"blueprints", "entities", "pages"}
+var importResources = slices.Clone(ValidResources)
+
 // RegisterImport registers the import command.
 func RegisterImport(rootCmd *cobra.Command) {
 	var (
@@ -97,25 +105,9 @@ Use --include to selectively import specific resource types.`,
 					includeList[i] = strings.TrimSpace(includeList[i])
 				}
 
-				// Validate resource types
-				validResources := map[string]bool{
-					"blueprints":            true,
-					"entities":              true,
-					"scorecards":            true,
-					"actions":               true,
-					"teams":                 true,
-					"users":                 true,
-					"automations":           true,
-					"pages":                 true,
-					"integrations":          true,
-					"blueprint-permissions": true,
-					"action-permissions":    true,
-					"page-permissions":      true,
-				}
-
 				for _, r := range includeList {
-					if !validResources[r] {
-						return fmt.Errorf("invalid resource: %s. Valid resources: blueprints, entities, scorecards, actions, teams, users, automations, pages, integrations, blueprint-permissions, action-permissions, page-permissions", r)
+					if err := ValidateResource(r, importResources); err != nil {
+						return err
 					}
 				}
 
@@ -457,7 +449,8 @@ Use --include to selectively import specific resource types.`,
 	importCmd.Flags().BoolVar(&skipSystemBlueprints, "skip-system-blueprints", false, "Skip system blueprint schemas (identifiers starting with _) and their entities")
 	importCmd.Flags().BoolVar(&skipSystemBlueprintProperties, "skip-system-blueprint-properties", false, "When used with --skip-system-blueprints, do not import custom properties on known system blueprints")
 	importCmd.Flags().BoolVar(&includeRuleResults, "include-rule-results", true, "Include _rule_result system blueprint entities (use --include-rule-results=false to exclude)")
-	importCmd.Flags().StringVar(&include, "include", "", "Comma-separated list of resources to import (e.g., 'blueprints,pages'). Available: blueprints, entities, scorecards, actions, teams, users, automations, pages, integrations. If not specified, imports all resources.")
+	validResourcesStr := strings.Join(importResources, ", ")
+	importCmd.Flags().StringVar(&include, "include", "", fmt.Sprintf("Comma-separated list of resources to import (e.g., 'blueprints,pages'). Available: %s. If not specified, imports all resources.", validResourcesStr))
 	importCmd.Flags().StringVar(&excludeBlueprints, "exclude-blueprints", "", "Comma-separated blueprint IDs to exclude entirely (schema + entities + scorecards + actions)")
 	importCmd.Flags().StringVar(&excludeBlueprintSchema, "exclude-blueprint-schema", "", "Comma-separated blueprint IDs to exclude schema only (entities, scorecards, actions still imported)")
 	importCmd.Flags().StringVar(&outputFormat, "output-format", "text", "Output format: text or json")
