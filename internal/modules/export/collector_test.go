@@ -5,12 +5,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"sync/atomic"
 	"testing"
 
 	"github.com/port-labs/port-cli/internal/api"
-	"github.com/port-labs/port-cli/internal/config"
 )
 
 func TestApplyBlueprintExclusions_Deep(t *testing.T) {
@@ -210,13 +208,6 @@ func TestCollector_ActionPermissionsNotCollectedWhenExcluded(t *testing.T) {
 	if actionPermsHit {
 		t.Error("action permissions endpoint should not be called when action-permissions not in IncludeResources")
 	}
-}
-
-func createTempConfig(t *testing.T) *config.ConfigManager {
-	t.Helper()
-	tempDir := t.TempDir()
-	configPath := filepath.Join(tempDir, "config.yaml")
-	return config.NewConfigManager(configPath)
 }
 
 func TestCollector_SkipSystemBlueprints_ExcludesSchemaAndEntities(t *testing.T) {

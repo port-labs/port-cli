@@ -911,7 +911,6 @@ func TestImportFolders_CreatedBeforePages(t *testing.T) {
 	})
 
 	importer := NewImporter(client)
-	result := &Result{}
 	data := &export.Data{
 		Blueprints: []api.Blueprint{{"identifier": "service", "title": "Service"}},
 		Folders: []api.Folder{
@@ -921,7 +920,7 @@ func TestImportFolders_CreatedBeforePages(t *testing.T) {
 		Pages: []api.Page{{"identifier": "service_overview", "title": "Service Overview", "parent": "root"}},
 	}
 
-	result = &Result{}
+	result := &Result{}
 	if err := importer.importOtherResources(context.Background(), data, Options{IncludeResources: []string{"pages"}}, result); err != nil {
 		t.Fatalf("importOtherResources error: %v", err)
 	}
@@ -947,13 +946,6 @@ func TestImportFolders_CreatedBeforePages(t *testing.T) {
 	if result.PagesCreated != 1 {
 		t.Fatalf("expected 1 page created, got %d", result.PagesCreated)
 	}
-}
-
-func createTempConfig(t *testing.T) *config.ConfigManager {
-	t.Helper()
-	tempDir := t.TempDir()
-	configPath := filepath.Join(tempDir, "config.yaml")
-	return config.NewConfigManager(configPath)
 }
 
 func TestImportOtherResources_SkipEntities_SkipsTeamsAndUsers(t *testing.T) {
@@ -2113,9 +2105,10 @@ func TestImportEntities_UsesBulkForBothPhases(t *testing.T) {
 	}
 	var phase1, phase2 int
 	for _, c := range bulkCalls {
-		if c.upsert == "false" {
+		switch c.upsert {
+		case "false":
 			phase1++
-		} else if c.upsert == "true" {
+		case "true":
 			phase2++
 		}
 	}

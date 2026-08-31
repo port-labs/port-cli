@@ -11,6 +11,14 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// migrateResources defines the resources accepted by the migrate command.
+// It currently mirrors the shared ValidResources list. To support a different
+// set for migrate only, replace the right-hand side with a command-specific
+// slice, for example:
+//
+//	var migrateResources = []string{"blueprints", "entities", "pages"}
+var migrateResources = slices.Clone(ValidResources)
+
 // RegisterMigrate registers the migrate command.
 func RegisterMigrate(rootCmd *cobra.Command) {
 	var (
@@ -145,25 +153,9 @@ Use --include to selectively migrate specific resource types.`,
 					includeList[i] = strings.TrimSpace(includeList[i])
 				}
 
-				// Validate resource types
-				validResources := map[string]bool{
-					"blueprints":            true,
-					"entities":              true,
-					"scorecards":            true,
-					"actions":               true,
-					"teams":                 true,
-					"users":                 true,
-					"automations":           true,
-					"pages":                 true,
-					"integrations":          true,
-					"blueprint-permissions": true,
-					"action-permissions":    true,
-					"page-permissions":      true,
-				}
-
 				for _, r := range includeList {
-					if !validResources[r] {
-						return fmt.Errorf("invalid resource: %s. Valid resources: blueprints, entities, scorecards, actions, teams, users, automations, pages, integrations, blueprint-permissions, action-permissions, page-permissions", r)
+					if err := ValidateResource(r, migrateResources); err != nil {
+						return err
 					}
 				}
 
@@ -574,7 +566,8 @@ Use --include to selectively migrate specific resource types.`,
 	migrateCmd.Flags().BoolVar(&skipSystemBlueprints, "skip-system-blueprints", false, "Skip system blueprint schemas (identifiers starting with _) and their entities")
 	migrateCmd.Flags().BoolVar(&skipSystemBlueprintProperties, "skip-system-blueprint-properties", false, "When used with --skip-system-blueprints, do not migrate custom properties on known system blueprints")
 	migrateCmd.Flags().BoolVar(&includeRuleResults, "include-rule-results", true, "Include _rule_result system blueprint entities (use --include-rule-results=false to exclude)")
-	migrateCmd.Flags().StringVar(&include, "include", "", "Comma-separated list of resources to migrate (e.g., 'blueprints,pages'). Available: blueprints, entities, scorecards, actions, teams, users, automations, pages, integrations. If not specified, migrates all resources.")
+	validResourcesStr := strings.Join(migrateResources, ", ")
+	migrateCmd.Flags().StringVar(&include, "include", "", fmt.Sprintf("Comma-separated list of resources to migrate (e.g., 'blueprints,pages'). Available: %s. If not specified, migrates all resources.", validResourcesStr))
 	migrateCmd.Flags().StringVar(&excludeBlueprints, "exclude-blueprints", "", "Comma-separated blueprint IDs to exclude entirely (schema + entities + scorecards + actions)")
 	migrateCmd.Flags().StringVar(&excludeBlueprintSchema, "exclude-blueprint-schema", "", "Comma-separated blueprint IDs to exclude schema only (entities, scorecards, actions still migrated)")
 	migrateCmd.Flags().StringVar(&outputFormat, "output-format", "text", "Output format: text or json")
@@ -613,7 +606,7 @@ func migrationFailureMessage(result *migrate.Result, maxErrors int) string {
 		b.WriteString(result.Errors[i])
 	}
 	if len(result.Errors) > limit {
-		b.WriteString(fmt.Sprintf("\n  ... and %d more", len(result.Errors)-limit))
+		fmt.Fprintf(&b, "\n  ... and %d more", len(result.Errors)-limit)
 	}
 	return b.String()
 }
