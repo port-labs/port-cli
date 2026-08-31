@@ -32,5 +32,5 @@ func ValidateResource(r string, allowed []string) error {
 			return nil
 		}
 	}
-	return fmt.Errorf("invalid resource: %s. Valid resources: %s", r, strings.Join(allowed, ", "))
+	return fmt.Errorf("invalid resource for --include: %s. Valid resources: %s", r, strings.Join(allowed, ", "))
 }
