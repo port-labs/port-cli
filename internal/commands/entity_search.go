@@ -19,28 +19,28 @@ func registerEntitySearchCommands() []*cobra.Command {
 }
 
 type entitySearchCommonFlags struct {
-	org                           string
-	format                        string
-	unwrap                        string
-	query                         string
-	queryFile                     string
-	include                       []string
-	exclude                       []string
-	limit                         int
-	from                          string
-	all                           bool
-	attachTitleToRelation         bool
-	excludeCalculatedProperties   bool
-	identifiers                   []string
-	countOnly                     bool
-	groupBy                       string
-	groupSort                     string
-	sort                          []string
+	org                         string
+	format                      string
+	unwrap                      string
+	query                       string
+	queryFile                   string
+	include                     []string
+	exclude                     []string
+	limit                       int
+	from                        string
+	all                         bool
+	attachTitleToRelation       bool
+	excludeCalculatedProperties bool
+	identifiers                 []string
+	countOnly                   bool
+	groupBy                     string
+	groupSort                   string
+	sort                        []string
 }
 
 func (f entitySearchCommonFlags) queryParams() api.EntitySearchQueryParams {
 	return api.EntitySearchQueryParams{
-		AttachTitleToRelation:        f.attachTitleToRelation,
+		AttachTitleToRelation:       f.attachTitleToRelation,
 		ExcludeCalculatedProperties: f.excludeCalculatedProperties,
 	}
 }
@@ -230,7 +230,7 @@ func registerEntityCount() *cobra.Command {
 			defer client.Close()
 
 			params := api.EntitySearchQueryParams{
-				AttachTitleToRelation:        attachTitleToRelation,
+				AttachTitleToRelation:       attachTitleToRelation,
 				ExcludeCalculatedProperties: excludeCalculatedProperties,
 			}
 			result, err := client.BlueprintEntitySearchCount(cmd.Context(), bp, queryObj, params)
@@ -260,7 +260,7 @@ func registerEntitySearchGlobal() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "search-global",
 		Short: "Search entities across all blueprints",
-		Long:    "Search entities using POST /v1/entities/search. The request body uses top-level combinator and rules (no query wrapper).",
+		Long:  "Search entities using POST /v1/entities/search. The request body uses top-level combinator and rules (no query wrapper).",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			body, err := api.LoadJSONObjectFromFlagOrFile(query, queryFile)
 			if err != nil {
@@ -280,7 +280,7 @@ func registerEntitySearchGlobal() *cobra.Command {
 			defer client.Close()
 
 			params := api.EntitySearchQueryParams{
-				AttachTitleToRelation:        attachTitleToRelation,
+				AttachTitleToRelation:       attachTitleToRelation,
 				ExcludeCalculatedProperties: excludeCalculatedProperties,
 			}
 			result, err := client.GlobalEntitySearch(cmd.Context(), body, params)

@@ -7,7 +7,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-
 )
 
 func TestBuildBlueprintEntitySearchBody_WrapsQuery(t *testing.T) {

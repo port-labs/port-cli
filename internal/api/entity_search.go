@@ -18,7 +18,7 @@ const (
 
 // EntitySearchQueryParams are passed as query-string parameters on entity search routes.
 type EntitySearchQueryParams struct {
-	AttachTitleToRelation        bool
+	AttachTitleToRelation       bool
 	ExcludeCalculatedProperties bool
 }
 
@@ -38,16 +38,16 @@ func (p EntitySearchQueryParams) ToMap() map[string]string {
 
 // BlueprintEntitySearchBodyOptions configures a blueprint-scoped entity search request body.
 type BlueprintEntitySearchBodyOptions struct {
-	Query      map[string]interface{}
+	Query       map[string]interface{}
 	Identifiers []string
-	Include    []string
-	Exclude    []string
-	Limit      int
-	From       string
-	GroupBy    map[string]interface{}
-	GroupSort  map[string]interface{}
-	Sort       []map[string]interface{}
-	CountOnly  bool
+	Include     []string
+	Exclude     []string
+	Limit       int
+	From        string
+	GroupBy     map[string]interface{}
+	GroupSort   map[string]interface{}
+	Sort        []map[string]interface{}
+	CountOnly   bool
 }
 
 // BuildBlueprintEntitySearchBody builds the JSON body for blueprint entity search / top-search.
