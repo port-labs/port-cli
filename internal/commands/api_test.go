@@ -445,3 +445,43 @@ func TestAuditSubcommandsFlagsParsed(t *testing.T) {
 		t.Errorf("expected 'yaml', got %q", format)
 	}
 }
+
+func TestEntitySearchSubcommandsFlagsParsed(t *testing.T) {
+	rootCmd := &cobra.Command{Use: "port"}
+	RegisterAPI(rootCmd)
+
+	apiCmd, _, _ := rootCmd.Find([]string{"api"})
+	entitiesCmd, _, _ := apiCmd.Find([]string{"entities"})
+	if entitiesCmd == nil {
+		t.Fatal("entities command not found")
+	}
+
+	searchCmd, _, _ := entitiesCmd.Find([]string{"search"})
+	if searchCmd == nil {
+		t.Fatal("entities search command not found")
+	}
+	err := searchCmd.ParseFlags([]string{
+		"--blueprint", "planning_priority",
+		"--query", `{"combinator":"and","rules":[]}`,
+		"--limit", "50",
+		"--unwrap", "entities",
+		"--group-by", "property:priority_decision",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error parsing search flags: %v", err)
+	}
+
+	countCmd, _, _ := entitiesCmd.Find([]string{"count"})
+	if countCmd == nil {
+		t.Fatal("entities count command not found")
+	}
+	err = countCmd.ParseFlags([]string{"--query", `{"combinator":"and","rules":[]}`})
+	if err != nil {
+		t.Fatalf("unexpected error parsing count flags: %v", err)
+	}
+
+	globalCmd, _, _ := entitiesCmd.Find([]string{"search-global"})
+	if globalCmd == nil {
+		t.Fatal("entities search-global command not found")
+	}
+}

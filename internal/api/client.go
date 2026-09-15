@@ -170,6 +170,7 @@ func (c *Client) request(ctx context.Context, method, path string, data any, par
 		return nil, err
 	}
 
+	path = NormalizeAPIPath(path)
 	url := fmt.Sprintf("%s%s", c.apiURL, path)
 
 	var jsonData []byte

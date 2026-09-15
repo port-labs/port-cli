@@ -56,6 +56,7 @@ type RequestParams struct {
 }
 
 func (c *Client) Request(ctx context.Context, params RequestParams) (any, error) {
+	params.Endpoint = NormalizeAPIPath(params.Endpoint)
 	resp, err := c.request(ctx, params.Method, params.Endpoint, params.Data, params.Params)
 	if err != nil {
 		return nil, err
