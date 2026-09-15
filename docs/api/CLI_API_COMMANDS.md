@@ -15,12 +15,68 @@ port api blueprints delete <id>             # Delete
 
 ### Entities
 ```bash
-port api entities list [--blueprint <id>]   # List (optionally filtered)
+port api entities list [--blueprint <id>] [--limit N] [--all]  # Search-backed list (default limit 100)
+port api entities search <blueprint> --query '<json>' [--unwrap entities]
+port api entities count <blueprint> --query '<json>' [--unwrap count]
+port api entities search-global --query '<json>'  # Cross-blueprint (top-level combinator/rules)
 port api entities get <blueprint> <entity>  # Get one
 port api entities create <blueprint> --data <file>  # Create
 port api entities update <blueprint> <entity> --data <file>  # Update
 port api entities delete <blueprint> <entity>  # Delete
 ```
+
+#### Entity search (PM OS / quarterly planning)
+
+Blueprint-scoped search wraps filters in a `query` object. Global search uses top-level `combinator` and `rules` (no `query` wrapper).
+
+**Q4 planning priorities (Doing):**
+```bash
+port api entities search planning_priority \
+  --query '{"combinator":"and","rules":[
+    {"relation":"quarter_r","operator":"=","value":"2026_q_4"},
+    {"property":"priority_decision","operator":"=","value":"Doing"}
+  ]}' \
+  --limit 100 \
+  --include '$identifier' '$title' priority_decision allocation category \
+  --unwrap entities
+```
+
+**Count Q4 priorities:**
+```bash
+port api entities count planning_priority \
+  --query '{"combinator":"and","rules":[{"relation":"quarter_r","operator":"=","value":"2026_q_4"}]}' \
+  --unwrap count
+```
+
+**AI team quarter plan row:**
+```bash
+port api entities search team_quarter_planning \
+  --query '{"combinator":"and","rules":[
+    {"relation":"quarter_r","operator":"=","value":"2026_q_4"},
+    {"relation":"team_r","operator":"=","value":"ai_team"}
+  ]}' \
+  --include '$identifier' insights capacity available_capacity \
+  --unwrap entities
+```
+
+**Distribution by priority_decision (`groupBy` / MCP parity):**
+```bash
+port api entities search planning_priority \
+  --query '{"combinator":"and","rules":[{"relation":"quarter_r","operator":"=","value":"2026_q_4"}]}' \
+  --group-by property:priority_decision \
+  --unwrap groups
+```
+
+#### MCP vs public REST
+
+| Flags / behavior | Backend route |
+|------------------|---------------|
+| `--query`, `--include`, `--exclude`, `--limit`, `--from`, `--all` | `POST /v1/blueprints/:id/entities/search` |
+| `--count-only` (alone) | `POST /v1/blueprints/:id/entities/search/count` |
+| `--group-by`, `--group-sort`, `--sort`, `--identifiers` | `POST /v1/blueprints/:id/entities/top-search` (MCP parity) |
+| `search-global` | `POST /v1/entities/search` |
+
+Port MCP `list_entities` matches the top-search contract for grouping and sorting. The public OpenAPI page for blueprint search may not list every field MCP accepts.
 
 ### Common Flags
 - `--org <name>` - Organization name

@@ -72,7 +72,10 @@ func RegisterAPI(rootCmd *cobra.Command) {
 		Short: "Entity operations",
 	}
 
-	entitiesCmd.AddCommand(registerEntityList())
+	entitiesCmd.AddCommand(registerEntityListSearchBacked())
+	for _, sub := range registerEntitySearchCommands() {
+		entitiesCmd.AddCommand(sub)
+	}
 	entitiesCmd.AddCommand(registerEntityGet())
 	entitiesCmd.AddCommand(registerEntityCreate())
 	entitiesCmd.AddCommand(registerEntityUpdate())
@@ -530,81 +533,6 @@ func registerBlueprintDelete() *cobra.Command {
 
 	cmd.Flags().StringVar(&org, "org", "", "Organization name (uses default if not specified)")
 	cmd.Flags().BoolVarP(&force, "force", "f", false, "Skip confirmation")
-
-	return cmd
-}
-
-// registerEntityList registers the entity list command.
-func registerEntityList() *cobra.Command {
-	var org, format, blueprint string
-
-	cmd := &cobra.Command{
-		Use:   "list",
-		Short: "List entities",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			flags := GetGlobalFlags(cmd.Context())
-			configManager := config.NewConfigManager(flags.ConfigFile)
-
-			cfg, err := configManager.LoadWithOverrides(
-				flags.ClientID,
-				flags.ClientSecret,
-				flags.APIURL,
-				org,
-			)
-			if err != nil {
-				return fmt.Errorf("failed to load configuration: %w", err)
-			}
-
-			useOrg := cfg.GetOrgOrDefault(org)
-			orgConfig, err := cfg.GetOrgConfig(useOrg)
-			if err != nil {
-				return err
-			}
-			token, err := getOrRefreshCommandToken(cmd, configManager, useOrg)
-			if err != nil {
-				return err
-			}
-			client := api.NewClient(api.ClientOpts{
-				Token:        token,
-				ClientID:     orgConfig.ClientID,
-				ClientSecret: orgConfig.ClientSecret,
-				APIURL:       orgConfig.APIURL,
-				Timeout:      0,
-			})
-			defer client.Close()
-
-			var result []api.Entity
-			if blueprint != "" {
-				entities, err := client.GetEntities(cmd.Context(), blueprint, nil)
-				if err != nil {
-					return fmt.Errorf("failed to list entities: %w", err)
-				}
-				result = entities
-			} else {
-				// Get all blueprints and then all entities
-				blueprints, err := client.GetBlueprints(cmd.Context())
-				if err != nil {
-					return fmt.Errorf("failed to get blueprints: %w", err)
-				}
-
-				for _, bp := range blueprints {
-					if identifier, ok := bp["identifier"].(string); ok {
-						entities, err := client.GetEntities(cmd.Context(), identifier, nil)
-						if err != nil {
-							continue // Skip blueprints without entities
-						}
-						result = append(result, entities...)
-					}
-				}
-			}
-
-			return formatOutput(result, format)
-		},
-	}
-
-	cmd.Flags().StringVar(&org, "org", "", "Organization name (uses default if not specified)")
-	cmd.Flags().StringVarP(&format, "format", "f", "json", "Output format: json, yaml")
-	cmd.Flags().StringVarP(&blueprint, "blueprint", "b", "", "Filter by blueprint ID")
 
 	return cmd
 }

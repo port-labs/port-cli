@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Added
+
+- `port api entities search`, `port api entities count`, and `port api entities search-global` for blueprint and cross-catalog entity queries using Port's search APIs.
+- Entity search flags for filters, field projection, pagination (`--from`, `--all`), and MCP parity options (`--group-by`, `--sort`, `--identifiers`, `--count-only`) via the top-search route when needed.
+- `port api entities list` now uses search with a default limit instead of unpaginated GET.
+
+### Fixed
+
+- `port api call` normalizes endpoint paths so values without a leading `/` join correctly with the API base URL.
+
 ## 0.4.0
 
 The `port-cli` repo has been moved under the `port-labs` GitHub organization.
