@@ -2,9 +2,7 @@ package commands
 
 import (
 	"testing"
-	"time"
 
-	"github.com/golang-jwt/jwt/v5"
 	"github.com/port-labs/port-cli/internal/auth"
 	"github.com/spf13/cobra"
 )
@@ -144,23 +142,6 @@ func TestAuthStatusFlagsParsed(t *testing.T) {
 	if org != "local" {
 		t.Errorf("expected 'local', got %q", org)
 	}
-}
-
-func testCommandJWT(t *testing.T, audience string, expiry time.Time) string {
-	t.Helper()
-
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"aud":                 audience,
-		"exp":                 float64(expiry.Unix()),
-		audience + "/email":   "user@test.com",
-		audience + "/orgId":   "someOrgId",
-		audience + "/orgName": "Org Name",
-	})
-	ss, err := token.SignedString([]byte("signing-key"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	return ss
 }
 
 func TestRefreshStatusLinesAvailable(t *testing.T) {

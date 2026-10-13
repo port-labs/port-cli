@@ -478,17 +478,17 @@ func TestExecute_AutoScopeBlueprints_ReusesEntityPreScanInsteadOfRefetching(t *t
 	defer sourceServer.Close()
 
 	targetServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/auth/access_token":
+		switch r.URL.Path {
+		case "/auth/access_token":
 			json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "accessToken": "tok", "expiresIn": 3600})
-		case r.URL.Path == "/blueprints":
+		case "/blueprints":
 			json.NewEncoder(w).Encode(map[string]interface{}{
 				"ok":         true,
 				"blueprints": []map[string]interface{}{{"identifier": "service"}},
 			})
-		case r.URL.Path == "/blueprints/service/entities-count":
+		case "/blueprints/service/entities-count":
 			json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "count": 0})
-		case r.URL.Path == "/blueprints/service/entities":
+		case "/blueprints/service/entities":
 			json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "entities": []interface{}{}})
 		default:
 			json.NewEncoder(w).Encode(map[string]interface{}{"ok": true})
@@ -2148,7 +2148,6 @@ func TestMigrate_EntitiesUseBulkEndpoint(t *testing.T) {
 	entityImporter := import_module.NewImporter(targetClient)
 	filtered := filterEntitiesByDiff(entities, entitiesToCreate, entitiesToUpdate)
 	err := entityImporter.ImportEntities(context.Background(), filtered, false, importResult)
-
 	if err != nil {
 		t.Fatalf("ImportEntities returned error: %v", err)
 	}

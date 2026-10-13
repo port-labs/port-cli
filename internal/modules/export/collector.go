@@ -113,20 +113,6 @@ func shouldCollect(resourceType string, includeResources []string) bool {
 	return false
 }
 
-// isTimeoutError checks if an error is a timeout error (504 Gateway Timeout).
-func isTimeoutError(err error) bool {
-	if err == nil {
-		return false
-	}
-	errStr := strings.ToLower(err.Error())
-	// Check for various timeout indicators
-	return strings.Contains(errStr, "504") ||
-		strings.Contains(errStr, "gateway timeout") ||
-		strings.Contains(errStr, "timeout_error") ||
-		strings.Contains(errStr, "request was too long") ||
-		strings.Contains(errStr, "timeout")
-}
-
 // FilterByField filters a slice of map-typed resources, keeping only items
 // whose field value appears in the ids set. Returns all items when ids is empty.
 func FilterByField[T ~map[string]interface{}](items []T, ids []string, field string) []T {

@@ -12,11 +12,6 @@ import (
 	"github.com/port-labs/port-cli/internal/useragent"
 )
 
-const (
-	cacheFile = ".port-cli-update-cache"
-	cacheTTL  = 24 * time.Hour
-)
-
 var releasesURL = "https://api.github.com/repos/port-labs/port-cli/releases/latest"
 
 // CheckResult represents the result of an update check.

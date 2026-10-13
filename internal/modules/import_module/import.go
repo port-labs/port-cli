@@ -975,39 +975,6 @@ func (i *Importer) createOrUpdateBlueprint(ctx context.Context, bp api.Blueprint
 	return false, false, err
 }
 
-// updateBlueprintFields updates a blueprint with dependent fields (relations, mirrorProperties, etc.).
-// Deprecated: Use updateBlueprintFieldsDirect instead for phased updates.
-func (i *Importer) updateBlueprintFields(ctx context.Context, id string, fields map[string]interface{}, existingBPs map[string]bool) error {
-	// Validate dependencies before update
-	tempBP := api.Blueprint(fields)
-	missing := ValidateAllDependencies(tempBP, existingBPs)
-	if len(missing) > 0 {
-		return fmt.Errorf("cannot add dependent fields - missing blueprints: %v", missing)
-	}
-
-	// Fetch existing blueprint
-	existing, err := i.client.GetBlueprint(ctx, id)
-	if err != nil {
-		return fmt.Errorf("failed to fetch blueprint: %w", err)
-	}
-
-	// Merge in the dependent fields
-	for k, v := range fields {
-		existing[k] = v
-	}
-
-	existing = api.Blueprint(cleanSystemFields(map[string]interface{}(existing),
-		[]string{"createdBy", "updatedBy", "createdAt", "updatedAt", "id"}))
-
-	// Update
-	_, err = i.client.UpdateBlueprint(ctx, id, existing)
-	if err != nil {
-		return fmt.Errorf("failed to update with dependent fields: %w", err)
-	}
-
-	return nil
-}
-
 // updateBlueprintFieldsDirect updates a blueprint by merging in specific fields.
 // This fetches the existing blueprint and merges the new fields, properly handling
 // nested maps (like adding new properties to existing calculationProperties).
@@ -1244,24 +1211,6 @@ func (i *Importer) ImportEntities(ctx context.Context, entities []api.Entity, in
 	}
 
 	return nil
-}
-
-// createOrUpdateEntity creates or updates a single entity.
-func (i *Importer) createOrUpdateEntity(ctx context.Context, blueprintID, entityID string, entity api.Entity) (bool, bool, error) {
-	_, err := i.client.CreateEntity(ctx, blueprintID, entity)
-	if err == nil {
-		return true, false, nil
-	}
-
-	if isConflictError(err) {
-		_, updateErr := i.client.UpdateEntity(ctx, blueprintID, entityID, entity)
-		if updateErr != nil {
-			return false, false, updateErr
-		}
-		return false, true, nil
-	}
-
-	return false, false, err
 }
 
 // processBulkChunk sends one batch of entities for a single blueprint to the bulk endpoint.
@@ -2172,38 +2121,6 @@ func sortPagesByAfterLevels(pages []api.Page) [][]api.Page {
 		levels = append(levels, level)
 	}
 	return levels
-}
-
-// applyPageOrdering applies the `after` field for pages that have one, sequentially
-// and in topological dependency order. This is called after the concurrent page
-// content pass so that sidebar ordering is set without race conditions.
-func (i *Importer) applyPageOrdering(ctx context.Context, pages []api.Page, result *Result) {
-	// Collect pages that have a non-empty after value.
-	var toOrder []api.Page
-	for _, p := range pages {
-		if after, ok := p["after"].(string); ok && after != "" {
-			toOrder = append(toOrder, p)
-		}
-	}
-	if len(toOrder) == 0 {
-		return
-	}
-
-	sorted := sortPagesByAfterDeps(toOrder)
-	for _, p := range sorted {
-		pageID, ok := p["identifier"].(string)
-		if !ok || pageID == "" {
-			continue
-		}
-		after := p["after"].(string)
-		_, err := i.client.UpdatePage(ctx, pageID, api.Page{"identifier": pageID, "after": after})
-		if err != nil {
-			// A missing sibling is benign — the page exists, just not in the exact spot.
-			if !isSidebarParentNotFound(err) {
-				i.errors.Add(err, "page", pageID)
-			}
-		}
-	}
 }
 
 // importPages imports pages in topological `after` order.

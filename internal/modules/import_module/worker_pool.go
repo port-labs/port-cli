@@ -10,7 +10,6 @@ import (
 type WorkerPool struct {
 	sem chan struct{}
 	wg  sync.WaitGroup
-	mu  sync.Mutex
 }
 
 // NewWorkerPool creates a worker pool with the specified concurrency limit.
