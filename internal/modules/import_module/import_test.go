@@ -384,7 +384,7 @@ func TestImportPages_UpdateSendsNavFields(t *testing.T) {
 		}
 		if r.Method == http.MethodPatch && r.URL.Path == "/pages/aws_cost_overview" {
 			json.NewDecoder(r.Body).Decode(&patchBody)
-			json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "page": patchBody})
+			json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "identifier": "aws_cost_overview"})
 			return
 		}
 		// GetPage — return empty existing page so agentIdentifier merge is a no-op.
@@ -464,7 +464,7 @@ func TestImportPages_UpdateFallsBackWithoutAfterWhenSiblingMissing(t *testing.T)
 				return
 			}
 			secondPatchBody = body
-			json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "page": body})
+			json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "identifier": "aws_cost_overview"})
 			return
 		}
 		if r.Method == http.MethodGet && r.URL.Path == "/pages/aws_cost_overview" {
@@ -503,11 +503,11 @@ func TestImportPages_UpdateFallsBackWithoutAfterWhenSiblingMissing(t *testing.T)
 	}
 }
 
-// TestImportPages_NullNavFieldsNotSentOnUpdate verifies that when the source page has
-// null nav fields (e.g. exported from an org where those fields weren't captured),
-// the PATCH request does NOT include those null fields — sending null would clear the
-// page's existing navigation context in Port.
-func TestImportPages_NullNavFieldsNotSentOnUpdate(t *testing.T) {
+// TestImportPages_NullPlacementSentOnUpdate verifies that explicit null parent
+// and after values reach the PATCH body, so the target page can be moved to the
+// sidebar root or the start of its level. Fields PATCH rejects (type, sidebar,
+// requiredQueryParams) and nulls for non-nullable fields are still left out.
+func TestImportPages_NullPlacementSentOnUpdate(t *testing.T) {
 	var patchBody map[string]interface{}
 
 	_, client := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
@@ -521,7 +521,7 @@ func TestImportPages_NullNavFieldsNotSentOnUpdate(t *testing.T) {
 		}
 		if r.Method == http.MethodPatch && r.URL.Path == "/pages/aws_cost_overview" {
 			json.NewDecoder(r.Body).Decode(&patchBody)
-			json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "page": patchBody})
+			json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "identifier": "aws_cost_overview"})
 			return
 		}
 		if r.Method == http.MethodGet && r.URL.Path == "/pages/aws_cost_overview" {
@@ -531,14 +531,14 @@ func TestImportPages_NullNavFieldsNotSentOnUpdate(t *testing.T) {
 		http.NotFound(w, r)
 	})
 
-	// Source page has null for all nav fields (common in exports from orgs that don't capture them)
 	page := api.Page{
 		"identifier":          "aws_cost_overview",
-		"type":                nil, // null
-		"parent":              nil, // null
-		"sidebar":             nil, // null
-		"after":               nil, // null
-		"requiredQueryParams": nil, // null
+		"type":                nil,
+		"parent":              nil,
+		"sidebar":             nil,
+		"after":               nil,
+		"section":             nil,
+		"requiredQueryParams": nil,
 		"title":               "AWS Cost Overview",
 		"widgets":             []interface{}{},
 	}
@@ -550,23 +550,221 @@ func TestImportPages_NullNavFieldsNotSentOnUpdate(t *testing.T) {
 	if result.PagesUpdated != 1 {
 		t.Fatalf("expected 1 page updated, got %d", result.PagesUpdated)
 	}
-	// Null string nav fields must NOT be sent in PATCH (would clear existing values)
-	if _, exists := patchBody["parent"]; exists {
-		t.Errorf("expected null parent to be stripped from PATCH, got %v", patchBody["parent"])
+	for _, field := range []string{"parent", "after"} {
+		v, exists := patchBody[field]
+		if !exists || v != nil {
+			t.Errorf("expected %s: null in PATCH, got present=%v value=%v", field, exists, v)
+		}
 	}
-	if _, exists := patchBody["sidebar"]; exists {
-		t.Errorf("expected null sidebar to be stripped from PATCH, got %v", patchBody["sidebar"])
+	for _, field := range []string{"type", "sidebar", "requiredQueryParams", "section"} {
+		if v, exists := patchBody[field]; exists {
+			t.Errorf("expected %s to be left out of PATCH, got %v", field, v)
+		}
 	}
-	if _, exists := patchBody["after"]; exists {
-		t.Errorf("expected null after to be stripped from PATCH, got %v", patchBody["after"])
+}
+
+// TestImportPages_CreateKeepsRequiredQueryParamsAndNullPlacement verifies that
+// POST keeps requiredQueryParams (supported for entity pages) and explicit null
+// placement fields, and drops nulls for fields that can't be null.
+func TestImportPages_CreateKeepsRequiredQueryParamsAndNullPlacement(t *testing.T) {
+	var postBody map[string]interface{}
+
+	_, client := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if authHandler(w, r) {
+			return
+		}
+		if r.Method == http.MethodPost && r.URL.Path == "/pages" {
+			json.NewDecoder(r.Body).Decode(&postBody)
+			w.WriteHeader(http.StatusCreated)
+			json.NewEncoder(w).Encode(map[string]interface{}{"ok": true})
+			return
+		}
+		http.NotFound(w, r)
+	})
+
+	page := api.Page{
+		"identifier":          "service_entity",
+		"type":                "entity",
+		"blueprint":           "service",
+		"requiredQueryParams": []interface{}{"identifier"},
+		"parent":              nil,
+		"after":               nil,
+		"sidebar":             nil,
+		"section":             nil,
+		"widgets":             []interface{}{},
 	}
-	// requiredQueryParams: null must be stripped from PATCH (not sent as null or []).
-	if _, exists := patchBody["requiredQueryParams"]; exists {
-		t.Errorf("expected null requiredQueryParams to be stripped from PATCH, got %v", patchBody["requiredQueryParams"])
+
+	importer := NewImporter(client)
+	result := &Result{}
+	importer.importPages(context.Background(), []api.Page{page}, result)
+
+	if result.PagesCreated != 1 {
+		t.Fatalf("expected 1 page created, got %d (errors: %v)", result.PagesCreated, importer.errors.ToStringSlice())
 	}
-	// type is always stripped from PATCH regardless
-	if _, exists := patchBody["type"]; exists {
-		t.Errorf("expected type to be stripped from PATCH, got %v", patchBody["type"])
+	params, ok := postBody["requiredQueryParams"].([]interface{})
+	if !ok || len(params) != 1 || params[0] != "identifier" {
+		t.Errorf("expected requiredQueryParams [identifier] in POST, got %v", postBody["requiredQueryParams"])
+	}
+	for _, field := range []string{"parent", "after", "sidebar"} {
+		v, exists := postBody[field]
+		if !exists || v != nil {
+			t.Errorf("expected %s: null in POST, got present=%v value=%v", field, exists, v)
+		}
+	}
+	if v, exists := postBody["section"]; exists {
+		t.Errorf("expected null section to be left out of POST, got %v", v)
+	}
+}
+
+// TestImportPages_WidgetlessUpdateReportedAsError verifies that when Port only
+// accepts a page without its widgets, the page is saved but the import reports
+// the missing widgets as an error instead of a clean success.
+func TestImportPages_WidgetlessUpdateReportedAsError(t *testing.T) {
+	var patchBodies []map[string]interface{}
+	agentErr := map[string]interface{}{
+		"ok":      false,
+		"error":   "invalid_request",
+		"message": "widgets/0 must have required property 'agentIdentifier'",
+	}
+
+	_, client := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if authHandler(w, r) {
+			return
+		}
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/pages":
+			w.WriteHeader(http.StatusConflict)
+			json.NewEncoder(w).Encode(map[string]interface{}{"ok": false, "error": "conflict"})
+		case r.Method == http.MethodGet && r.URL.Path == "/pages/agents":
+			json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "page": map[string]interface{}{"identifier": "agents"}})
+		case r.Method == http.MethodPatch && r.URL.Path == "/pages/agents":
+			var body map[string]interface{}
+			json.NewDecoder(r.Body).Decode(&body)
+			patchBodies = append(patchBodies, body)
+			if _, hasWidgets := body["widgets"]; hasWidgets {
+				w.WriteHeader(http.StatusUnprocessableEntity)
+				json.NewEncoder(w).Encode(agentErr)
+				return
+			}
+			json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "identifier": "agents"})
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	page := api.Page{
+		"identifier": "agents",
+		"type":       "dashboard",
+		"widgets":    []interface{}{map[string]interface{}{"id": "w1", "type": "ai-agent"}},
+	}
+
+	importer := NewImporter(client)
+	result := &Result{}
+	importer.importPages(context.Background(), []api.Page{page}, result)
+
+	if result.PagesUpdated != 1 {
+		t.Fatalf("expected the page to be saved once, got %d updates", result.PagesUpdated)
+	}
+	if len(patchBodies) != 2 {
+		t.Fatalf("expected a PATCH with widgets then one without, got %d PATCH calls", len(patchBodies))
+	}
+	errs := importer.errors.ToStringSlice()
+	if len(errs) != 1 || !strings.Contains(errs[0], "saved without its widgets") || !strings.Contains(errs[0], "agentIdentifier") {
+		t.Fatalf("expected one 'saved without its widgets' error naming the cause, got %v", errs)
+	}
+}
+
+// TestImportPages_WidgetlessUpdateFailureReported verifies that when the
+// fallback update without widgets also fails, that failure is reported and the
+// page isn't counted as updated.
+func TestImportPages_WidgetlessUpdateFailureReported(t *testing.T) {
+	patches := 0
+
+	_, client := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if authHandler(w, r) {
+			return
+		}
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/pages":
+			w.WriteHeader(http.StatusConflict)
+			json.NewEncoder(w).Encode(map[string]interface{}{"ok": false, "error": "conflict"})
+		case r.Method == http.MethodGet && r.URL.Path == "/pages/agents":
+			json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "page": map[string]interface{}{"identifier": "agents"}})
+		case r.Method == http.MethodPatch && r.URL.Path == "/pages/agents":
+			patches++
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			message := "widgets/0 must have required property 'agentIdentifier'"
+			if patches == 2 {
+				message = "title must be a string"
+			}
+			json.NewEncoder(w).Encode(map[string]interface{}{"ok": false, "error": "invalid_request", "message": message})
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	page := api.Page{
+		"identifier": "agents",
+		"type":       "dashboard",
+		"widgets":    []interface{}{map[string]interface{}{"id": "w1", "type": "ai-agent"}},
+	}
+
+	importer := NewImporter(client)
+	result := &Result{}
+	importer.importPages(context.Background(), []api.Page{page}, result)
+
+	if patches != 2 {
+		t.Fatalf("expected a PATCH with widgets then one without, got %d", patches)
+	}
+	if result.PagesUpdated != 0 {
+		t.Fatalf("expected no page counted as updated, got %d", result.PagesUpdated)
+	}
+	errs := importer.errors.ToStringSlice()
+	if len(errs) != 1 || !strings.Contains(errs[0], "title must be a string") {
+		t.Fatalf("expected the fallback failure to be reported, got %v", errs)
+	}
+}
+
+// TestImportPages_FailedCreateRetryIsReported verifies that when a narrowed
+// create retry fails with a non-conflict error, the failure is recorded.
+func TestImportPages_FailedCreateRetryIsReported(t *testing.T) {
+	posts := 0
+
+	_, client := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if authHandler(w, r) {
+			return
+		}
+		if r.Method == http.MethodPost && r.URL.Path == "/pages" {
+			posts++
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			if posts == 1 {
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"ok": false, "error": "invalid_request",
+					"message": `must NOT have additional properties, additional property: "sidebar"`,
+				})
+				return
+			}
+			json.NewEncoder(w).Encode(map[string]interface{}{"ok": false, "error": "invalid_request", "message": "title must be a string"})
+			return
+		}
+		http.NotFound(w, r)
+	})
+
+	page := api.Page{"identifier": "broken", "type": "dashboard", "sidebar": "catalog", "title": 7}
+
+	importer := NewImporter(client)
+	result := &Result{}
+	importer.importPages(context.Background(), []api.Page{page}, result)
+
+	if posts != 2 {
+		t.Fatalf("expected the create to be retried once without sidebar, got %d POSTs", posts)
+	}
+	if result.PagesCreated != 0 || result.PagesUpdated != 0 {
+		t.Fatalf("expected no page counted, got created=%d updated=%d", result.PagesCreated, result.PagesUpdated)
+	}
+	errs := importer.errors.ToStringSlice()
+	if len(errs) != 1 || !strings.Contains(errs[0], "title must be a string") {
+		t.Fatalf("expected the retry failure to be reported, got %v", errs)
 	}
 }
 
@@ -836,7 +1034,7 @@ func TestImportPages_OrderingRespectedInline(t *testing.T) {
 			mu.Lock()
 			patchOrder = append(patchOrder, r.URL.Path)
 			mu.Unlock()
-			json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "page": map[string]interface{}{}})
+			json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "identifier": r.URL.Path[len("/pages/"):]})
 			return
 		}
 		http.NotFound(w, r)

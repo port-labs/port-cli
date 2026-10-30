@@ -450,7 +450,7 @@ func (c *Collector) Collect(ctx context.Context, opts Options) (*Data, error) {
 			if err != nil {
 				return fmt.Errorf("failed to get folders: %w", err)
 			}
-			pages, err := c.client.GetPages(ctx)
+			pages, err := c.client.GetPages(ctx, api.PageListOptions{})
 			if err != nil {
 				return fmt.Errorf("failed to get pages: %w", err)
 			}

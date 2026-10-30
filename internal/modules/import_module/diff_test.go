@@ -222,3 +222,25 @@ func TestCompare_ActionPermissions(t *testing.T) {
 
 // Compile-time check: Context import used to avoid unused import error.
 var _ = context.Background
+
+func TestPagesEqual_NullPlacement(t *testing.T) {
+	tests := []struct {
+		name    string
+		source  api.Page
+		current api.Page
+		want    bool
+	}{
+		{"null parent matches absent parent", api.Page{"identifier": "p", "parent": nil}, api.Page{"identifier": "p"}, true},
+		{"null parent matches null parent", api.Page{"identifier": "p", "parent": nil}, api.Page{"identifier": "p", "parent": nil}, true},
+		{"null parent differs from a folder", api.Page{"identifier": "p", "parent": nil}, api.Page{"identifier": "p", "parent": "team-pages"}, false},
+		{"null after differs from a sibling", api.Page{"identifier": "p", "after": nil}, api.Page{"identifier": "p", "after": "home"}, false},
+		{"null sidebar is still ignored", api.Page{"identifier": "p", "sidebar": nil}, api.Page{"identifier": "p", "sidebar": "catalog"}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := pagesEqual(tt.source, tt.current); got != tt.want {
+				t.Errorf("pagesEqual() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

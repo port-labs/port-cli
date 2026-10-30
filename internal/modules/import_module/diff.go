@@ -423,17 +423,19 @@ func (d *DiffComparer) compareUsers(importUsers, currentUsers []api.User, includ
 
 // pagesEqual compares two pages for equality.
 //
-// Nav fields that are nil/null in the import page are excluded from comparison —
-// we don't send null nav fields to Port (sending null clears existing values),
-// so a null source nav field should not trigger an update.
+// A null parent or after means the same as an absent one (sidebar root, start
+// of the level), so the two are treated as equal; any other difference counts.
+// Other null nav fields are excluded because they are never sent to Port.
 //
 // requiredQueryParams: null and [] are both treated as "empty" and excluded
-// when the source value is empty, since we strip it before sending.
+// when the source value is empty.
 func pagesEqual(importPage, currentPage api.Page) bool {
 	exclude := []string{"createdBy", "updatedBy", "createdAt", "updatedAt", "id", "protected"}
 
 	for _, field := range pageNavFields {
-		if field == "requiredQueryParams" {
+		switch field {
+		case "parent", "after":
+		case "requiredQueryParams":
 			importVal := importPage[field]
 			importEmpty := importVal == nil || (func() bool {
 				s, ok := importVal.([]interface{})
@@ -442,12 +444,20 @@ func pagesEqual(importPage, currentPage api.Page) bool {
 			if importEmpty {
 				exclude = append(exclude, field)
 			}
-		} else if v, exists := importPage[field]; exists && v == nil {
-			exclude = append(exclude, field)
+		default:
+			if v, exists := importPage[field]; exists && v == nil {
+				exclude = append(exclude, field)
+			}
 		}
 	}
 
-	return resourcesEqual(map[string]interface{}(importPage), map[string]interface{}(currentPage), exclude)
+	nullPlacement := []string{"parent", "after"}
+	importCopy := cleanSystemFields(importPage, nil)
+	currentCopy := cleanSystemFields(currentPage, nil)
+	dropNullFields(importCopy, nullPlacement)
+	dropNullFields(currentCopy, nullPlacement)
+
+	return resourcesEqual(importCopy, currentCopy, exclude)
 }
 
 // comparePages compares import pages with current pages.

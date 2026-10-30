@@ -1583,7 +1583,7 @@ func TestImportToTarget_PageCreateConflictFallsBackToUpdate(t *testing.T) {
 			calls = append(calls, "update")
 			json.NewDecoder(r.Body).Decode(&patchBody)
 			mu.Unlock()
-			json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "page": map[string]interface{}{"identifier": "home"}})
+			json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "identifier": "home"})
 		default:
 			json.NewEncoder(w).Encode(map[string]interface{}{"ok": true})
 		}
@@ -2300,5 +2300,63 @@ func TestExportFromSource_AutomationsIncludeOnlyAutomationTriggers(t *testing.T)
 	}
 	if len(data.Actions) != 1 || data.Actions[0]["identifier"] != "ttl-expire" {
 		t.Fatalf("expected only automation action, got %#v", data.Actions)
+	}
+}
+
+func TestImportToTarget_PageCreatedWithoutWidgetsReportsError(t *testing.T) {
+	var mu sync.Mutex
+	var postBodies []api.Page
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/auth/access_token":
+			json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "accessToken": "tok", "expiresIn": 3600})
+		case r.Method == http.MethodPost && r.URL.Path == "/pages":
+			var body api.Page
+			json.NewDecoder(r.Body).Decode(&body)
+			mu.Lock()
+			postBodies = append(postBodies, body)
+			mu.Unlock()
+			if _, hasWidgets := body["widgets"]; hasWidgets {
+				w.WriteHeader(http.StatusUnprocessableEntity)
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"ok": false, "error": "invalid_request",
+					"message": "widgets/0 must have required property 'agentIdentifier'",
+				})
+				return
+			}
+			w.WriteHeader(http.StatusCreated)
+			json.NewEncoder(w).Encode(map[string]interface{}{"ok": true})
+		default:
+			json.NewEncoder(w).Encode(map[string]interface{}{"ok": true})
+		}
+	}))
+	defer server.Close()
+
+	m := &Module{
+		targetClient: api.NewClient(api.ClientOpts{ClientID: "id", ClientSecret: "secret", APIURL: server.URL}),
+	}
+	data := &export.Data{
+		Pages: []api.Page{
+			{"identifier": "agents", "type": "dashboard", "widgets": []interface{}{map[string]interface{}{"id": "w1", "type": "ai-agent"}}},
+		},
+		BlueprintPermissions: map[string]api.Permissions{},
+		ActionPermissions:    map[string]api.Permissions{},
+		PagePermissions:      map[string]api.Permissions{},
+	}
+	diff := &import_module.DiffResult{PagesToCreate: data.Pages}
+
+	result, err := m.importToTarget(context.Background(), data, diff, false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(postBodies) != 2 {
+		t.Fatalf("expected a create with widgets then one without, got %d POSTs", len(postBodies))
+	}
+	if result.PagesCreated != 1 {
+		t.Fatalf("expected the page to be created once, got %d", result.PagesCreated)
+	}
+	if len(result.Errors) != 1 || !strings.Contains(result.Errors[0], "Page agents: page saved without its widgets") {
+		t.Fatalf("expected one 'saved without its widgets' error for page agents, got %v", result.Errors)
 	}
 }
