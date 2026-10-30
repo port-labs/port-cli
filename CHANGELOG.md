@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Added
+
+- `port api pages` supports the rest of Port's Pages API:
+  - `replace [page-id]` replaces a whole page (PUT); `update` still changes only the fields you give it.
+  - `duplicate [page-id]` copies a page together with its permissions.
+  - `version` shows whether the organization is on the beta or GA Pages API.
+  - `org-permissions get` / `org-permissions update` manage who can create pages.
+  - `widgets create`, `widgets update` and `widgets delete` change individual widgets without rewriting the page.
+- `port api pages list` accepts `--compact` (metadata only, no widgets) and `--include-private` (also list private pages).
+
+### Fixed
+
+- `port api pages update` no longer prints `null` after a successful update. `create`, `update`, `replace` and `duplicate` now print the page as Port stored it.
+- `port import` and `port migrate` keep `requiredQueryParams` when creating pages, so entity pages keep their required query parameters.
+- `port import` and `port migrate` send explicit `parent: null` and `after: null`, so a page can be moved back to the sidebar root or the start of its level. A null `parent`/`after` and a missing one are now treated as the same placement when deciding whether a page needs an update.
+- When Port only accepts a page without its widgets, `port import` and `port migrate` still save the page but now report an error naming the page and the widget problem, instead of reporting success.
+- `port import` now reports a page as failed when a retried create fails for a reason other than a conflict; previously the page was silently skipped.
+
 ## 0.4.0
 
 The `port-cli` repo has been moved under the `port-labs` GitHub organization.

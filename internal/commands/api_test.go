@@ -107,6 +107,39 @@ func TestPageSubcommandsFlagsParsed(t *testing.T) {
 	if updateCmd == nil {
 		t.Fatal("pages update command not found")
 	}
+
+	if err := listCmd.ParseFlags([]string{"--compact", "--include-private"}); err != nil {
+		t.Fatalf("unexpected error parsing list flags: %v", err)
+	}
+	for _, name := range []string{"compact", "include-private"} {
+		if v, _ := listCmd.Flags().GetBool(name); !v {
+			t.Errorf("expected --%s to be set", name)
+		}
+	}
+
+	for _, path := range [][]string{
+		{"replace"},
+		{"duplicate"},
+		{"version"},
+		{"org-permissions", "get"},
+		{"org-permissions", "update"},
+		{"widgets", "create"},
+		{"widgets", "update"},
+		{"widgets", "delete"},
+	} {
+		found, _, err := pagesCmd.Find(path)
+		if err != nil || found == nil || found.Name() != path[len(path)-1] {
+			t.Fatalf("pages %v command not found", path)
+		}
+	}
+
+	widgetCreate, _, _ := pagesCmd.Find([]string{"widgets", "create"})
+	if err := widgetCreate.ParseFlags([]string{"--data", "widget.json", "--parent-widget", "dashboard-widget"}); err != nil {
+		t.Fatalf("unexpected error parsing widgets create flags: %v", err)
+	}
+	if parent, _ := widgetCreate.Flags().GetString("parent-widget"); parent != "dashboard-widget" {
+		t.Errorf("expected --parent-widget dashboard-widget, got %q", parent)
+	}
 }
 
 func TestTeamSubcommandsFlagsParsed(t *testing.T) {

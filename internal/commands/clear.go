@@ -500,7 +500,7 @@ func clearAllBlueprints(cmd *cobra.Command, client *api.Client, blueprints []api
 func clearPagesAndFolders(cmd *cobra.Command, client *api.Client, deleteProtected bool) error {
 	ctx := cmd.Context()
 
-	pages, err := client.GetPages(ctx)
+	pages, err := client.GetPages(ctx, api.PageListOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to list pages: %w", err)
 	}

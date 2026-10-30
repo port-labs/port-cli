@@ -2232,148 +2232,87 @@ func (i *Importer) importPage(ctx context.Context, page api.Page, result *Result
 		return
 	}
 
-	// metaFields are always stripped (audit metadata, internal IDs).
-	metaFields := []string{"createdBy", "updatedBy", "createdAt", "updatedAt", "id", "protected"}
-	// navFields control sidebar placement.
-	navFields := []string{"after", "section", "sidebar", "parent", "requiredQueryParams"}
+	pageForCreate := CleanPageForCreate(page)
+	pageForUpdate := CleanPageForUpdate(page)
 
-	// buildPage strips the given extra fields and recursively cleans widget metadata.
-	buildPage := func(extra []string) api.Page {
-		strip := append(metaFields, extra...)
-		cleaned := cleanSystemFields(page, strip)
-		if widgets, ok := cleaned["widgets"].([]interface{}); ok {
-			cleaned["widgets"] = cleanWidgetsRecursive(widgets)
-		}
-		return api.Page(cleaned)
-	}
+	_, err := i.client.CreatePage(ctx, pageForCreate)
 
-	// pageForCreate keeps `type` and sidebar placement fields, but strips
-	// requiredQueryParams because Port rejects it for some page types on create.
-	pageForCreate := buildPage([]string{"requiredQueryParams"})
-	// pageForUpdate keeps navigation fields (including `after`) so Port places the
-	// page in the correct sidebar position. `type` is stripped because the PATCH
-	// endpoint rejects it. Null string nav fields are stripped to avoid clearing
-	// existing values in the target.
-	pageForUpdate := buildPage([]string{"type", "requiredQueryParams", "sidebar"})
-	for _, field := range navFields {
-		if v, exists := pageForUpdate[field]; exists && v == nil {
-			delete(pageForUpdate, field)
-		}
-	}
-	var (
-		createPosted api.Page
-		createdPage  api.Page
-		err          error
-	)
-
-	createPosted = pageForCreate
-	createdPage, err = i.client.CreatePage(ctx, createPosted)
-
-	needsUpdate := false
 	i.mu.Lock()
+	posted := pageForCreate
+	if IsAfterItemNotInParent(err) || extractAdditionalProperty(err) != "" {
+		posted, err = i.retryCreatePageWithNarrowFallbacks(ctx, pageForCreate, err)
+	}
 	if err == nil {
 		result.PagesCreated++
 		i.mu.Unlock()
-		i.logPageCreateMismatch(ctx, pageID, pageForCreate, createPosted, createdPage)
+		i.logPageCreateMismatch(ctx, pageID, pageForCreate, posted)
 		return
-	} else if IsAfterItemNotInParent(err) || extractAdditionalProperty(err) != "" {
-		createPosted, createdPage, retryErr := i.retryCreatePageWithNarrowFallbacks(ctx, pageForCreate, err)
-		if retryErr == nil {
-			result.PagesCreated++
-			i.mu.Unlock()
-			i.logPageCreateMismatch(ctx, pageID, pageForCreate, createPosted, createdPage)
-			return
-		} else if isConflictError(retryErr) {
-			needsUpdate = true
-		}
-	} else if isConflictError(err) {
-		needsUpdate = true
-	} else if strings.Contains(err.Error(), "agentIdentifier") {
-		// Create failed with agentIdentifier — check if the page already exists.
-		existingPage, fetchErr := i.client.GetPage(ctx, pageID)
-		if fetchErr == nil && existingPage != nil {
-			pageWithoutWidgets := make(api.Page)
-			for k, v := range pageForUpdate {
-				if k != "widgets" {
-					pageWithoutWidgets[k] = v
-				}
-			}
-			_, updateErr := i.client.UpdatePage(ctx, pageID, pageWithoutWidgets)
-			if updateErr != nil {
-				i.errors.Add(updateErr, "page", pageID)
-			} else {
-				result.PagesUpdated++
-			}
-		} else {
+	}
+	defer i.mu.Unlock()
+
+	switch {
+	case isConflictError(err):
+	case IsAgentIdentifierError(err):
+		// A widget validation error can hide a conflict, so update the page if it already exists.
+		if existing, fetchErr := i.client.GetPage(ctx, pageID); fetchErr != nil || existing == nil {
 			i.errors.Add(err, "page", pageID)
+			return
 		}
-	} else {
+	default:
 		i.errors.Add(err, "page", pageID)
+		return
 	}
 
-	if needsUpdate {
-		// Fetch existing page to preserve fields like agentIdentifier.
-		existingPage, fetchErr := i.client.GetPage(ctx, pageID)
-		if fetchErr == nil && existingPage != nil {
-			if existingWidgets, ok := existingPage["widgets"].([]interface{}); ok {
-				if newWidgets, ok := pageForUpdate["widgets"].([]interface{}); ok {
-					pageForUpdate["widgets"] = mergeWidgetAgentIdentifiers(newWidgets, existingWidgets)
-				}
-			}
-		}
-
-		_, updateErr := i.client.UpdatePage(ctx, pageID, pageForUpdate)
-		if updateErr != nil {
-			if IsAfterItemNotInParent(updateErr) || extractAdditionalProperty(updateErr) != "" {
-				_, retryErr := i.retryUpdatePageWithNarrowFallbacks(ctx, pageID, pageForUpdate, updateErr)
-				if retryErr != nil {
-					i.errors.Add(retryErr, "page", pageID)
-				} else {
-					result.PagesUpdated++
-				}
-			} else if strings.Contains(updateErr.Error(), "agentIdentifier") {
-				// Fetch existing page to merge agentIdentifiers from its widgets, then retry.
-				if existingPage, fetchErr := i.client.GetPage(ctx, pageID); fetchErr == nil && existingPage != nil {
-					if existingWidgets, ok := existingPage["widgets"].([]interface{}); ok {
-						if newWidgets, ok := pageForUpdate["widgets"].([]interface{}); ok {
-							pageForUpdate["widgets"] = mergeWidgetAgentIdentifiers(newWidgets, existingWidgets)
-						}
-					}
-				}
-				_, retryErr := i.client.UpdatePage(ctx, pageID, pageForUpdate)
-				if retryErr != nil {
-					// Last resort: update without widgets.
-					pageWithoutWidgets := make(api.Page)
-					for k, v := range pageForUpdate {
-						if k != "widgets" {
-							pageWithoutWidgets[k] = v
-						}
-					}
-					_, lastErr := i.client.UpdatePage(ctx, pageID, pageWithoutWidgets)
-					if lastErr != nil {
-						i.errors.Add(lastErr, "page", pageID)
-					} else {
-						result.PagesUpdated++
-					}
-				} else {
-					result.PagesUpdated++
-				}
-			} else {
-				i.errors.Add(updateErr, "page", pageID)
-			}
-		} else {
-			result.PagesUpdated++
-		}
-	}
-	i.mu.Unlock()
+	i.updateExistingPage(ctx, pageID, pageForUpdate, result)
 }
 
-func (i *Importer) logPageCreateMismatch(ctx context.Context, pageID string, intended api.Page, posted api.Page, created api.Page) {
+// updateExistingPage PATCHes a page that already exists in the target. The
+// caller must hold i.mu. If Port only accepts the page without its widgets,
+// the page is saved that way and the missing widgets are reported as an error.
+func (i *Importer) updateExistingPage(ctx context.Context, pageID string, page api.Page, result *Result) {
+	if existing, err := i.client.GetPage(ctx, pageID); err == nil && existing != nil {
+		if existingWidgets, ok := existing["widgets"].([]interface{}); ok {
+			if newWidgets, ok := page["widgets"].([]interface{}); ok {
+				page["widgets"] = mergeWidgetAgentIdentifiers(newWidgets, existingWidgets)
+			}
+		}
+	}
+
+	_, err := i.client.UpdatePage(ctx, pageID, page)
+	if IsAfterItemNotInParent(err) || extractAdditionalProperty(err) != "" {
+		err = i.retryUpdatePageWithNarrowFallbacks(ctx, pageID, page, err)
+	}
+	if err == nil {
+		result.PagesUpdated++
+		return
+	}
+	if !IsAgentIdentifierError(err) {
+		i.errors.Add(err, "page", pageID)
+		return
+	}
+
+	withoutWidgets := clonePage(page)
+	delete(withoutWidgets, "widgets")
+	if _, lastErr := i.client.UpdatePage(ctx, pageID, withoutWidgets); lastErr != nil {
+		i.errors.Add(lastErr, "page", pageID)
+		return
+	}
+	result.PagesUpdated++
+	i.errors.Add(PageSavedWithoutWidgetsError(err), "page", pageID)
+}
+
+// PageSavedWithoutWidgetsError describes a page that was written without its
+// widgets because Port rejected them with cause.
+func PageSavedWithoutWidgetsError(cause error) error {
+	return fmt.Errorf("page saved without its widgets because Port rejected them: %w", cause)
+}
+
+func (i *Importer) logPageCreateMismatch(ctx context.Context, pageID string, intended api.Page, posted api.Page) {
 	if !i.verbose {
 		return
 	}
-	actualPage, err := i.client.GetPage(ctx, pageID)
-	if err == nil && actualPage != nil {
+	var created api.Page
+	if actualPage, err := i.client.GetPage(ctx, pageID); err == nil {
 		created = actualPage
 	}
 
@@ -2478,30 +2417,7 @@ func clonePage(page api.Page) api.Page {
 	return cloned
 }
 
-func (i *Importer) retryCreatePageWithNarrowFallbacks(ctx context.Context, base api.Page, initialErr error) (api.Page, api.Page, error) {
-	candidate := clonePage(base)
-	currentErr := initialErr
-
-	for {
-		nextCandidate, changed := removeSingleFailingPageField(candidate, currentErr)
-		if !changed {
-			return candidate, nil, currentErr
-		}
-
-		createdPage, retryErr := i.client.CreatePage(ctx, nextCandidate)
-		if retryErr == nil {
-			return nextCandidate, createdPage, nil
-		}
-		if isConflictError(retryErr) {
-			return nextCandidate, nil, retryErr
-		}
-
-		candidate = nextCandidate
-		currentErr = retryErr
-	}
-}
-
-func (i *Importer) retryUpdatePageWithNarrowFallbacks(ctx context.Context, pageID string, base api.Page, initialErr error) (api.Page, error) {
+func (i *Importer) retryCreatePageWithNarrowFallbacks(ctx context.Context, base api.Page, initialErr error) (api.Page, error) {
 	candidate := clonePage(base)
 	currentErr := initialErr
 
@@ -2511,9 +2427,29 @@ func (i *Importer) retryUpdatePageWithNarrowFallbacks(ctx context.Context, pageI
 			return candidate, currentErr
 		}
 
-		updatedPage, retryErr := i.client.UpdatePage(ctx, pageID, nextCandidate)
+		_, retryErr := i.client.CreatePage(ctx, nextCandidate)
+		if retryErr == nil || isConflictError(retryErr) {
+			return nextCandidate, retryErr
+		}
+
+		candidate = nextCandidate
+		currentErr = retryErr
+	}
+}
+
+func (i *Importer) retryUpdatePageWithNarrowFallbacks(ctx context.Context, pageID string, base api.Page, initialErr error) error {
+	candidate := clonePage(base)
+	currentErr := initialErr
+
+	for {
+		nextCandidate, changed := removeSingleFailingPageField(candidate, currentErr)
+		if !changed {
+			return currentErr
+		}
+
+		_, retryErr := i.client.UpdatePage(ctx, pageID, nextCandidate)
 		if retryErr == nil {
-			return updatedPage, nil
+			return nil
 		}
 
 		candidate = nextCandidate
@@ -2611,36 +2547,41 @@ var pageMetaFields = []string{"createdBy", "updatedBy", "createdAt", "updatedAt"
 // doesn't exist in the target org.
 var pageNavFields = []string{"after", "section", "sidebar", "parent", "requiredQueryParams"}
 
-// CleanPageForCreate returns a copy of page with audit/internal fields removed.
-// Sidebar placement fields are preserved, but requiredQueryParams is stripped
-// because Port rejects it for some page types on create.
+// pageNonNullableFields can't be sent as null, so a null source value is dropped.
+// parent, after and sidebar are nullable: null moves the page to the sidebar root,
+// to the start of its level, or out of the catalog sidebar.
+var pageNonNullableFields = []string{"section", "requiredQueryParams"}
+
+// CleanPageForCreate returns a copy of page ready for POST /pages, with
+// audit/internal fields removed and widget metadata cleaned.
 func CleanPageForCreate(page api.Page) api.Page {
-	strip := append(pageMetaFields, "requiredQueryParams")
-	cleaned := cleanSystemFields(map[string]interface{}(page), strip)
+	cleaned := cleanSystemFields(map[string]interface{}(page), pageMetaFields)
+	dropNullFields(cleaned, pageNonNullableFields)
 	if widgets, ok := cleaned["widgets"].([]interface{}); ok {
 		cleaned["widgets"] = cleanWidgetsRecursive(widgets)
 	}
 	return api.Page(cleaned)
 }
 
-// CleanPageForUpdate returns a copy of page with audit/internal fields and `type`
-// removed. Navigation fields are kept so Port can move the page to the correct
-// sidebar position, except requiredQueryParams and sidebar which are stripped by
-// default because Port rejects them for some page types on update. Nav fields
-// that are nil/null are also stripped — sending null would clear the page's
-// existing navigation context in Port.
+// CleanPageForUpdate returns a copy of page ready for PATCH /pages/{id}. PATCH
+// rejects type, requiredQueryParams and sidebar, so those are removed. Explicit
+// null parent and after values are kept so the target page can be moved back.
 func CleanPageForUpdate(page api.Page) api.Page {
 	strip := append(pageMetaFields, "type", "requiredQueryParams", "sidebar")
 	cleaned := cleanSystemFields(map[string]interface{}(page), strip)
-	for _, field := range pageNavFields {
-		if v, exists := cleaned[field]; exists && v == nil {
-			delete(cleaned, field)
-		}
-	}
+	dropNullFields(cleaned, pageNonNullableFields)
 	if widgets, ok := cleaned["widgets"].([]interface{}); ok {
 		cleaned["widgets"] = cleanWidgetsRecursive(widgets)
 	}
 	return api.Page(cleaned)
+}
+
+func dropNullFields(resource map[string]interface{}, fields []string) {
+	for _, field := range fields {
+		if v, exists := resource[field]; exists && v == nil {
+			delete(resource, field)
+		}
+	}
 }
 
 // CleanPageForUpdateNoNav is the fallback for CleanPageForUpdate when Port rejects
