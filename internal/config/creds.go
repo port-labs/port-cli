@@ -120,9 +120,10 @@ func (cm *ConfigManager) GetOrRefreshToken(ctx context.Context, org string) (*au
 		if refreshErr != nil {
 			if errors.Is(refreshErr, auth.ErrInvalidGrant) {
 				_ = cm.DeleteToken(org)
+				// Do not wrap ErrRefreshToken: callers ignore that for client-cred
+				// fallback, but invalid_grant means the OAuth session is dead.
 				return fmt.Errorf(
-					"%w: refresh token was rejected by Auth0 (invalid_grant); run `%s` to re-authenticate: %w",
-					ErrRefreshToken,
+					"refresh token was rejected by Auth0 (invalid_grant); run `%s` to re-authenticate: %w",
 					CmdAuthLogin,
 					refreshErr,
 				)
@@ -147,7 +148,14 @@ func (cm *ConfigManager) GetOrRefreshToken(ctx context.Context, org string) (*au
 	return refreshed, nil
 }
 
+// ShouldIgnoreGetOrRefreshTokenError reports whether callers may fall back to
+// client credentials (or a still-returned near-expiry token) after GetOrRefreshToken.
+// invalid_grant must not be ignored: the OAuth refresh family is revoked and
+// the user must re-authenticate.
 func ShouldIgnoreGetOrRefreshTokenError(err error) bool {
+	if errors.Is(err, auth.ErrInvalidGrant) {
+		return false
+	}
 	return errors.Is(err, ErrNoStoredToken) || errors.Is(err, ErrRefreshToken)
 }
 

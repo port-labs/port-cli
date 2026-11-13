@@ -259,15 +259,35 @@ func TestGetOrRefreshTokenClearsCredsOnInvalidGrant(t *testing.T) {
 	if !errors.Is(err, ErrGetOrRefreshToken) {
 		t.Fatalf("expected ErrGetOrRefreshToken, got %v", err)
 	}
-	if !errors.Is(err, ErrRefreshToken) {
-		t.Fatalf("expected ErrRefreshToken, got %v", err)
+	if errors.Is(err, ErrRefreshToken) {
+		t.Fatalf("invalid_grant must not wrap ErrRefreshToken (callers would ignore it): %v", err)
 	}
 	if !errors.Is(err, auth.ErrInvalidGrant) {
 		t.Fatalf("expected ErrInvalidGrant, got %v", err)
+	}
+	if ShouldIgnoreGetOrRefreshTokenError(err) {
+		t.Fatalf("invalid_grant must not be ignorable for client-cred fallback")
 	}
 
 	_, getErr := manager.GetToken("test-org")
 	if !errors.Is(getErr, ErrOrgNotFound) {
 		t.Fatalf("expected credentials cleared, got %v", getErr)
+	}
+}
+
+func TestShouldIgnoreGetOrRefreshTokenError(t *testing.T) {
+	t.Parallel()
+
+	if !ShouldIgnoreGetOrRefreshTokenError(fmt.Errorf("%w: %w", ErrGetOrRefreshToken, ErrNoStoredToken)) {
+		t.Fatal("expected ErrNoStoredToken to be ignorable")
+	}
+	if !ShouldIgnoreGetOrRefreshTokenError(fmt.Errorf("%w: %w", ErrGetOrRefreshToken, ErrRefreshToken)) {
+		t.Fatal("expected ErrRefreshToken to be ignorable")
+	}
+	if ShouldIgnoreGetOrRefreshTokenError(fmt.Errorf("%w: %w", ErrGetOrRefreshToken, auth.ErrInvalidGrant)) {
+		t.Fatal("expected ErrInvalidGrant not to be ignorable")
+	}
+	if ShouldIgnoreGetOrRefreshTokenError(errors.New("other")) {
+		t.Fatal("expected unrelated errors not to be ignorable")
 	}
 }
