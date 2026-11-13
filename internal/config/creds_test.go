@@ -3,6 +3,7 @@ package config
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -169,5 +170,104 @@ func TestGetOrRefreshTokenReturnsRefreshErrorWhenExchangeFails(t *testing.T) {
 	}
 	if !errors.Is(err, ErrRefreshToken) {
 		t.Fatalf("expected ErrRefreshToken, got %v", err)
+	}
+}
+
+func TestGetOrRefreshTokenUsesTokenRefreshedByAnotherProcess(t *testing.T) {
+	dir := t.TempDir()
+	manager := NewConfigManager(filepath.Join(dir, "config.yaml"))
+
+	audience := "https://api.example.com"
+	rotatedJWT := configTestJWT(t, audience, time.Now().Add(time.Hour))
+
+	valid, err := auth.ParseToken(rotatedJWT)
+	if err != nil {
+		t.Fatalf("ParseToken failed: %v", err)
+	}
+	valid.RefreshToken = "rotated-by-other-process"
+	valid.AuthBaseURL = "https://auth.getport.io"
+
+	expired, err := auth.ParseToken(configTestJWT(t, audience, time.Now().Add(-time.Hour)))
+	if err != nil {
+		t.Fatalf("ParseToken failed: %v", err)
+	}
+	expired.RefreshToken = "stale-refresh-token"
+	expired.AuthBaseURL = "https://auth.getport.io"
+	if err := manager.StoreToken("test-org", expired); err != nil {
+		t.Fatalf("StoreToken failed: %v", err)
+	}
+
+	observeCalls := 0
+	orig := auth.RefreshAccessToken
+	t.Cleanup(func() { auth.RefreshAccessToken = orig })
+	auth.RefreshAccessToken = func(_ context.Context, _, _ string) (*auth.Token, error) {
+		observeCalls++
+		return nil, errors.New("should not refresh when disk already has a valid token")
+	}
+
+	// Hold the lock while another process "finishes" a refresh, then release so
+	// GetOrRefreshToken re-reads the rotated credentials instead of calling Auth0.
+	ready := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		_ = withFileLock(manager.credsLockPath(), func() error {
+			close(ready)
+			time.Sleep(50 * time.Millisecond)
+			return manager.StoreToken("test-org", valid)
+		})
+		close(done)
+	}()
+
+	<-ready
+	got, err := manager.GetOrRefreshToken(context.Background(), "test-org")
+	<-done
+	if err != nil {
+		t.Fatalf("GetOrRefreshToken failed: %v", err)
+	}
+	if got.RefreshToken != "rotated-by-other-process" {
+		t.Fatalf("expected token from other process, got %q", got.RefreshToken)
+	}
+	if observeCalls != 0 {
+		t.Fatalf("expected no Auth0 refresh after peer refresh, got %d calls", observeCalls)
+	}
+}
+
+func TestGetOrRefreshTokenClearsCredsOnInvalidGrant(t *testing.T) {
+	dir := t.TempDir()
+	manager := NewConfigManager(filepath.Join(dir, "config.yaml"))
+
+	orig := auth.RefreshAccessToken
+	t.Cleanup(func() { auth.RefreshAccessToken = orig })
+	auth.RefreshAccessToken = func(_ context.Context, _, _ string) (*auth.Token, error) {
+		return nil, fmt.Errorf("%w: Unknown or invalid refresh token", auth.ErrInvalidGrant)
+	}
+
+	token, err := auth.ParseToken(configTestJWT(t, "https://api.example.com", time.Now().Add(-time.Hour)))
+	if err != nil {
+		t.Fatalf("ParseToken failed: %v", err)
+	}
+	token.RefreshToken = "old-refresh-token"
+	token.AuthBaseURL = "https://auth.getport.io"
+	if err := manager.StoreToken("test-org", token); err != nil {
+		t.Fatalf("StoreToken failed: %v", err)
+	}
+
+	got, err := manager.GetOrRefreshToken(context.Background(), "test-org")
+	if got != nil {
+		t.Fatalf("expected no token after invalid_grant, got %+v", got)
+	}
+	if !errors.Is(err, ErrGetOrRefreshToken) {
+		t.Fatalf("expected ErrGetOrRefreshToken, got %v", err)
+	}
+	if !errors.Is(err, ErrRefreshToken) {
+		t.Fatalf("expected ErrRefreshToken, got %v", err)
+	}
+	if !errors.Is(err, auth.ErrInvalidGrant) {
+		t.Fatalf("expected ErrInvalidGrant, got %v", err)
+	}
+
+	_, getErr := manager.GetToken("test-org")
+	if !errors.Is(getErr, ErrOrgNotFound) {
+		t.Fatalf("expected credentials cleared, got %v", getErr)
 	}
 }
