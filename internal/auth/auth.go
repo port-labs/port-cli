@@ -78,7 +78,10 @@ func unregisterClientID(baseURL string) {
 // indefinitely at startup.
 var refreshClient = &http.Client{Timeout: 10 * time.Second}
 
-var ErrInterrupted = errors.New("interrupted")
+var (
+	ErrInterrupted  = errors.New("interrupted")
+	ErrInvalidGrant = errors.New("invalid_grant")
+)
 
 func TokenFromOAuth(ctx context.Context, opts LoginOpts) (*Token, error) {
 	obtainedToken := make(chan *oauth2.Token)
@@ -310,7 +313,11 @@ func refreshAccessToken(ctx context.Context, authBaseURL, oldRefreshToken string
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("failed refreshing token (%s): %s", resp.Status, string(body))
+		bodyStr := string(body)
+		if strings.Contains(bodyStr, "invalid_grant") {
+			return nil, fmt.Errorf("%w: failed refreshing token (%s): %s", ErrInvalidGrant, resp.Status, bodyStr)
+		}
+		return nil, fmt.Errorf("failed refreshing token (%s): %s", resp.Status, bodyStr)
 	}
 
 	var tokenResp struct {

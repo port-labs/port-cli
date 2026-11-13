@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -136,5 +137,24 @@ func TestRefreshAccessTokenUnsupportedBaseURL(t *testing.T) {
 	_, err := RefreshAccessToken(context.Background(), "https://unsupported.example.com", "refresh-token")
 	if err == nil {
 		t.Fatal("expected error for unsupported base URL")
+	}
+}
+
+func TestRefreshAccessTokenInvalidGrant(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"error":"invalid_grant","error_description":"Unknown or invalid refresh token."}`))
+	}))
+	defer server.Close()
+
+	registerClientID(server.URL, "test-client-id")
+	defer unregisterClientID(server.URL)
+
+	_, err := RefreshAccessToken(context.Background(), server.URL, "old-refresh-token")
+	if err == nil {
+		t.Fatal("expected invalid_grant error")
+	}
+	if !errors.Is(err, ErrInvalidGrant) {
+		t.Fatalf("expected ErrInvalidGrant, got %v", err)
 	}
 }
