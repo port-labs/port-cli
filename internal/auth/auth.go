@@ -314,7 +314,10 @@ func refreshAccessToken(ctx context.Context, authBaseURL, oldRefreshToken string
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		bodyStr := string(body)
-		if strings.Contains(bodyStr, "invalid_grant") {
+		var oauthErr struct {
+			Error string `json:"error"`
+		}
+		if json.Unmarshal(body, &oauthErr) == nil && oauthErr.Error == "invalid_grant" {
 			return nil, fmt.Errorf("%w: failed refreshing token (%s): %s", ErrInvalidGrant, resp.Status, bodyStr)
 		}
 		return nil, fmt.Errorf("failed refreshing token (%s): %s", resp.Status, bodyStr)

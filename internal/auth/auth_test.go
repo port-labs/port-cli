@@ -158,3 +158,22 @@ func TestRefreshAccessTokenInvalidGrant(t *testing.T) {
 		t.Fatalf("expected ErrInvalidGrant, got %v", err)
 	}
 }
+
+func TestRefreshAccessTokenDoesNotTreatErrorDescriptionAsInvalidGrant(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":"access_denied","error_description":"looks like invalid_grant but is not"}`))
+	}))
+	defer server.Close()
+
+	registerClientID(server.URL, "test-client-id")
+	defer unregisterClientID(server.URL)
+
+	_, err := RefreshAccessToken(context.Background(), server.URL, "old-refresh-token")
+	if err == nil {
+		t.Fatal("expected refresh error")
+	}
+	if errors.Is(err, ErrInvalidGrant) {
+		t.Fatalf("error_description substring must not map to ErrInvalidGrant, got %v", err)
+	}
+}
