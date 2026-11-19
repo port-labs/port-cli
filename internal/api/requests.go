@@ -909,88 +909,6 @@ func (c *Client) DeleteAutomation(ctx context.Context, automationIdentifier stri
 	return c.DeleteActionByID(ctx, automationIdentifier)
 }
 
-// GetPages retrieves all pages.
-func (c *Client) GetPages(ctx context.Context) ([]Page, error) {
-	resp, err := c.request(ctx, "GET", "/pages", nil, nil)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	var result struct {
-		Pages []Page `json:"pages"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("failed to decode pages: %w", err)
-	}
-
-	return result.Pages, nil
-}
-
-// CreatePage creates a new page.
-func (c *Client) CreatePage(ctx context.Context, page Page) (Page, error) {
-	resp, err := c.request(ctx, "POST", "/pages", page, nil)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	var result struct {
-		Page Page `json:"page"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("failed to decode page: %w", err)
-	}
-
-	return result.Page, nil
-}
-
-// GetPage retrieves a single page by identifier.
-func (c *Client) GetPage(ctx context.Context, pageIdentifier string) (Page, error) {
-	resp, err := c.request(ctx, "GET", fmt.Sprintf("/pages/%s", pageIdentifier), nil, nil)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	var result struct {
-		Page Page `json:"page"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("failed to decode page: %w", err)
-	}
-
-	return result.Page, nil
-}
-
-// UpdatePage updates an existing page.
-func (c *Client) UpdatePage(ctx context.Context, pageIdentifier string, page Page) (Page, error) {
-	resp, err := c.request(ctx, "PATCH", fmt.Sprintf("/pages/%s", pageIdentifier), page, nil)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	var result struct {
-		Page Page `json:"page"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("failed to decode page: %w", err)
-	}
-
-	return result.Page, nil
-}
-
-// DeletePage deletes a page.
-func (c *Client) DeletePage(ctx context.Context, pageIdentifier string) error {
-	resp, err := c.request(ctx, "DELETE", fmt.Sprintf("/pages/%s", pageIdentifier), nil, nil)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	return nil
-}
-
 // GetFolders retrieves sidebar folders from the catalog sidebar.
 func (c *Client) GetFolders(ctx context.Context) ([]Folder, error) {
 	resp, err := c.request(ctx, "GET", "/sidebars/catalog", nil, nil)
@@ -1170,42 +1088,6 @@ func (c *Client) UpdateActionPermissions(ctx context.Context, actionIdentifier s
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, fmt.Errorf("failed to decode updated action permissions: %w", err)
-	}
-
-	return result.Permissions, nil
-}
-
-// GetPagePermissions retrieves permissions for a page.
-func (c *Client) GetPagePermissions(ctx context.Context, pageIdentifier string) (Permissions, error) {
-	resp, err := c.request(ctx, "GET", fmt.Sprintf("/pages/%s/permissions", pageIdentifier), nil, nil)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	var result struct {
-		Permissions Permissions `json:"permissions"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("failed to decode page permissions: %w", err)
-	}
-
-	return result.Permissions, nil
-}
-
-// UpdatePagePermissions updates permissions for a page.
-func (c *Client) UpdatePagePermissions(ctx context.Context, pageIdentifier string, permissions Permissions) (Permissions, error) {
-	resp, err := c.request(ctx, "PATCH", fmt.Sprintf("/pages/%s/permissions", pageIdentifier), permissions, nil)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	var result struct {
-		Permissions Permissions `json:"permissions"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("failed to decode updated page permissions: %w", err)
 	}
 
 	return result.Permissions, nil

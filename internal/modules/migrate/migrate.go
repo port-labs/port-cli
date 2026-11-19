@@ -576,7 +576,7 @@ func (m *Module) exportFromSource(ctx context.Context, opts Options) (*export.Da
 			if err != nil {
 				return nil // Non-fatal
 			}
-			pages, err := m.sourceClient.GetPages(ctx)
+			pages, err := m.sourceClient.GetPages(ctx, api.PageListOptions{})
 			if err != nil {
 				return nil // Non-fatal
 			}
@@ -1728,6 +1728,7 @@ func (m *Module) importToTarget(ctx context.Context, data *export.Data, diffResu
 										addPageError(lastErr)
 									} else {
 										markPageUpdated()
+										addPageError(import_module.PageSavedWithoutWidgetsError(retryErr))
 									}
 								} else {
 									markPageUpdated()
@@ -1778,6 +1779,7 @@ func (m *Module) importToTarget(ctx context.Context, data *export.Data, diffResu
 								addPageError(retryErr)
 							} else {
 								markPageCreated()
+								addPageError(import_module.PageSavedWithoutWidgetsError(err))
 							}
 						} else {
 							addPageError(err)

@@ -89,6 +89,11 @@ func RegisterAPI(rootCmd *cobra.Command) {
 	pagesCmd.AddCommand(registerPageCreate())
 	pagesCmd.AddCommand(registerPageUpdate())
 	pagesCmd.AddCommand(registerPageDelete())
+	pagesCmd.AddCommand(registerPageReplace())
+	pagesCmd.AddCommand(registerPageDuplicate())
+	pagesCmd.AddCommand(registerPageVersion())
+	pagesCmd.AddCommand(registerPageOrgPermissions())
+	pagesCmd.AddCommand(registerPageWidgets())
 
 	// Team subcommands
 	teamsCmd := &cobra.Command{
@@ -1010,6 +1015,7 @@ func registerPageDelete() *cobra.Command {
 // registerPageList registers the page list command.
 func registerPageList() *cobra.Command {
 	var org, format string
+	var compact, includePrivate bool
 
 	cmd := &cobra.Command{
 		Use:   "list",
@@ -1041,7 +1047,10 @@ func registerPageList() *cobra.Command {
 			})
 			defer client.Close()
 
-			result, err := client.GetPages(cmd.Context())
+			result, err := client.GetPages(cmd.Context(), api.PageListOptions{
+				Compact:        compact,
+				IncludePrivate: includePrivate,
+			})
 			if err != nil {
 				return fmt.Errorf("failed to list pages: %w", err)
 			}
@@ -1052,6 +1061,8 @@ func registerPageList() *cobra.Command {
 
 	cmd.Flags().StringVar(&org, "org", "", "Organization name (uses default if not specified)")
 	cmd.Flags().StringVarP(&format, "format", "f", "json", "Output format: json, yaml")
+	cmd.Flags().BoolVar(&compact, "compact", false, "Return page metadata only, without widgets")
+	cmd.Flags().BoolVar(&includePrivate, "include-private", false, "Also return pages with private visibility")
 
 	return cmd
 }
@@ -1094,13 +1105,13 @@ func registerPageCreate() *cobra.Command {
 			})
 			defer client.Close()
 
-			result, err := client.CreatePage(cmd.Context(), api.Page(data))
+			pageID, err := client.CreatePage(cmd.Context(), api.Page(data))
 			if err != nil {
 				return fmt.Errorf("failed to create page: %w", err)
 			}
 
 			cmd.Printf("✓ Page created successfully!\n")
-			return formatOutput(result, "json")
+			return printPageAfterWrite(cmd, client, pageID)
 		},
 	}
 
@@ -1118,6 +1129,7 @@ func registerPageUpdate() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "update [page-id]",
 		Short: "Update an existing page",
+		Long:  "Partially update a page (PATCH). Only the fields in the data file change; set parent or after to null to move the page to the sidebar root or the start of its level.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			pageID := args[0]
@@ -1151,13 +1163,13 @@ func registerPageUpdate() *cobra.Command {
 			})
 			defer client.Close()
 
-			result, err := client.UpdatePage(cmd.Context(), pageID, api.Page(data))
+			updatedID, err := client.UpdatePage(cmd.Context(), pageID, api.Page(data))
 			if err != nil {
 				return fmt.Errorf("failed to update page: %w", err)
 			}
 
 			cmd.Printf("✓ Page updated successfully!\n")
-			return formatOutput(result, "json")
+			return printPageAfterWrite(cmd, client, updatedID)
 		},
 	}
 
