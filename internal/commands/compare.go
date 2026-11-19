@@ -11,6 +11,14 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// compareResources defines the resources accepted by the compare command.
+// It currently mirrors the shared ValidResources list. To support a different
+// set for compare only, replace the right-hand side with a command-specific
+// slice, for example:
+//
+//	var compareResources = []string{"blueprints", "entities", "pages"}
+var compareResources = slices.Clone(ValidResources)
+
 // RegisterCompare registers the compare command.
 func RegisterCompare(rootCmd *cobra.Command) {
 	var (
@@ -94,15 +102,9 @@ Examples:
 				for i := range includeList {
 					includeList[i] = strings.TrimSpace(includeList[i])
 				}
-				validResources := map[string]bool{
-					"blueprints": true, "actions": true, "scorecards": true,
-					"pages": true, "integrations": true, "teams": true, "users": true,
-					"automations": true, "blueprint-permissions": true, "action-permissions": true,
-					"page-permissions": true, "entities": true,
-				}
 				for _, r := range includeList {
-					if !validResources[r] {
-						return fmt.Errorf("invalid resource: %s. Valid resources: blueprints, actions, automations, scorecards, pages, integrations, teams, users, blueprint-permissions, action-permissions, page-permissions, entities", r)
+					if err := ValidateResource(r, compareResources); err != nil {
+						return err
 					}
 				}
 
@@ -166,7 +168,8 @@ Examples:
 
 	compareCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Show changed resource identifiers")
 	compareCmd.Flags().BoolVar(&full, "full", false, "Show full field-level differences")
-	compareCmd.Flags().StringVar(&include, "include", "", "Comma-separated list of resource types to compare")
+	validResourcesStr := strings.Join(compareResources, ", ")
+	compareCmd.Flags().StringVar(&include, "include", "", fmt.Sprintf("Comma-separated list of resource types to compare. Available: %s", validResourcesStr))
 	compareCmd.Flags().BoolVar(&failOnDiff, "fail-on-diff", false, "Exit with code 1 if differences found")
 
 	rootCmd.AddCommand(compareCmd)

@@ -237,7 +237,7 @@ func validateSkillFolderNameMatch(folderBase string, files []api.SkillFileInput,
 			}
 			if nameID != folderID {
 				return "", fmt.Errorf(
-					`skill folder %q does not match SKILL.md name %q. Rename the folder or set name: in SKILL.md frontmatter so they match.`,
+					`skill folder %q does not match SKILL.md name %q. Rename the folder or set name: in SKILL.md frontmatter so they match`,
 					folderBase,
 					meta.Name,
 				)
@@ -252,7 +252,7 @@ func validateSkillFolderNameMatch(folderBase string, files []api.SkillFileInput,
 		}
 		if overrideID != folderID {
 			return "", fmt.Errorf(
-				`--identifier %q does not match skill folder %q. Use the folder name or align SKILL.md name: with the folder.`,
+				`--identifier %q does not match skill folder %q. Use the folder name or align SKILL.md name: with the folder`,
 				identifierOverride,
 				folderBase,
 			)
