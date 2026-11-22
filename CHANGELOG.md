@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Added
+
+- `port api call --data` can read the request body from a file (`--data @body.json`) or from stdin (`--data -`), so large bodies no longer have to be passed as a command-line argument.
+
 ## 0.4.0
 
 The `port-cli` repo has been moved under the `port-labs` GitHub organization.

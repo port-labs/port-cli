@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/port-labs/port-cli/internal/api"
 	"github.com/port-labs/port-cli/internal/auth"
@@ -2183,6 +2185,33 @@ func loadJSONFile(filePath string) (map[string]interface{}, error) {
 	return result, nil
 }
 
+// resolveRequestBody returns the request body for the --data flag of `api call`.
+// "-" or "@-" reads the body from stdin, "@<path>" reads it from a file, and
+// any other value is used as the body itself. A JSON body never starts with
+// "@" and is never just "-", so literal bodies are unaffected.
+func resolveRequestBody(data string, stdin io.Reader) (string, error) {
+	switch {
+	case data == "-" || data == "@-":
+		body, err := io.ReadAll(stdin)
+		if err != nil {
+			return "", fmt.Errorf("failed to read request body from stdin: %w", err)
+		}
+		return string(body), nil
+	case strings.HasPrefix(data, "@"):
+		path := strings.TrimPrefix(data, "@")
+		if path == "" {
+			return "", fmt.Errorf("missing file path after \"@\" in --data")
+		}
+		body, err := os.ReadFile(path)
+		if err != nil {
+			return "", fmt.Errorf("failed to read request body from %s: %w", path, err)
+		}
+		return string(body), nil
+	default:
+		return data, nil
+	}
+}
+
 func registerGenericAPICall() *cobra.Command {
 	var method, org, format, data, unwrap string
 
@@ -2199,9 +2228,21 @@ port api call /blueprints --unwrap blueprints
 # trigger an action
 port api call /actions/my-action/runs --data '{"properties": {}}'
 
+# read the request body from a file
+port api call /actions/my-action/runs --data @body.json
+
+# read the request body from stdin
+jq -n '{properties: {}}' | port api call /actions/my-action/runs --data -
+
 # get action runs for org
 port api call /actions/runs --org my-org`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			body, err := resolveRequestBody(data, cmd.InOrStdin())
+			if err != nil {
+				return err
+			}
+			data = body
+
 			flags := GetGlobalFlags(cmd.Context())
 			configManager := config.NewConfigManager(flags.ConfigFile)
 
@@ -2275,7 +2316,7 @@ port api call /actions/runs --org my-org`,
 	cmd.Flags().StringVar(&org, "org", "", "Organization name (uses default if not specified)")
 	cmd.Flags().StringVarP(&method, "method", "X", "", `The HTTP method for the request (default "GET")`)
 	cmd.Flags().StringVarP(&format, "format", "f", "json", "Output format: json, yaml")
-	cmd.Flags().StringVar(&data, "data", "", "Data passed in the request body")
+	cmd.Flags().StringVar(&data, "data", "", `Data passed in the request body. Use "@<file>" to read it from a file, or "-" to read it from stdin`)
 	cmd.Flags().StringVar(&unwrap, "unwrap", "", "Print only this top-level field from the raw API response envelope")
 
 	return cmd
