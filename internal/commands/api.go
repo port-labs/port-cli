@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/port-labs/port-cli/internal/api"
 	"github.com/port-labs/port-cli/internal/auth"
@@ -2183,6 +2185,27 @@ func loadJSONFile(filePath string) (map[string]interface{}, error) {
 	return result, nil
 }
 
+// readRequestBody reads the `api call` request body from r, such as stdin.
+func readRequestBody(r io.Reader) (string, error) {
+	body, err := io.ReadAll(r)
+	if err != nil {
+		return "", fmt.Errorf("failed to read request body from stdin: %w", err)
+	}
+	return string(body), nil
+}
+
+// readRequestBodyFile reads the `api call` request body from the file at path.
+func readRequestBodyFile(path string) (string, error) {
+	if path == "" {
+		return "", fmt.Errorf("missing file path after \"@\" in --data")
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("failed to read request body from %s: %w", path, err)
+	}
+	return string(body), nil
+}
+
 func registerGenericAPICall() *cobra.Command {
 	var method, org, format, data, unwrap string
 
@@ -2199,9 +2222,28 @@ port api call /blueprints --unwrap blueprints
 # trigger an action
 port api call /actions/my-action/runs --data '{"properties": {}}'
 
+# read the request body from a file
+port api call /actions/my-action/runs --data @body.json
+
+# read the request body from stdin
+jq -n '{properties: {}}' | port api call /actions/my-action/runs --data -
+
 # get action runs for org
 port api call /actions/runs --org my-org`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// A JSON body never starts with "@" and is never just "-", so literal
+			// bodies are unaffected.
+			var err error
+			switch {
+			case data == "-" || data == "@-":
+				data, err = readRequestBody(cmd.InOrStdin())
+			case strings.HasPrefix(data, "@"):
+				data, err = readRequestBodyFile(strings.TrimPrefix(data, "@"))
+			}
+			if err != nil {
+				return err
+			}
+
 			flags := GetGlobalFlags(cmd.Context())
 			configManager := config.NewConfigManager(flags.ConfigFile)
 
@@ -2275,7 +2317,7 @@ port api call /actions/runs --org my-org`,
 	cmd.Flags().StringVar(&org, "org", "", "Organization name (uses default if not specified)")
 	cmd.Flags().StringVarP(&method, "method", "X", "", `The HTTP method for the request (default "GET")`)
 	cmd.Flags().StringVarP(&format, "format", "f", "json", "Output format: json, yaml")
-	cmd.Flags().StringVar(&data, "data", "", "Data passed in the request body")
+	cmd.Flags().StringVar(&data, "data", "", `Data passed in the request body. Use "@<file>" to read it from a file, or "-" to read it from stdin`)
 	cmd.Flags().StringVar(&unwrap, "unwrap", "", "Print only this top-level field from the raw API response envelope")
 
 	return cmd
