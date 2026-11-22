@@ -435,10 +435,10 @@ func pagesEqual(importPage, currentPage api.Page) bool {
 	for _, field := range pageNavFields {
 		if field == "requiredQueryParams" {
 			importVal := importPage[field]
-			importEmpty := importVal == nil || (func() bool {
+			importEmpty := importVal == nil || func() bool {
 				s, ok := importVal.([]interface{})
 				return ok && len(s) == 0
-			}())
+			}()
 			if importEmpty {
 				exclude = append(exclude, field)
 			}
