@@ -2185,31 +2185,25 @@ func loadJSONFile(filePath string) (map[string]interface{}, error) {
 	return result, nil
 }
 
-// resolveRequestBody returns the request body for the --data flag of `api call`.
-// "-" or "@-" reads the body from stdin, "@<path>" reads it from a file, and
-// any other value is used as the body itself. A JSON body never starts with
-// "@" and is never just "-", so literal bodies are unaffected.
-func resolveRequestBody(data string, stdin io.Reader) (string, error) {
-	switch {
-	case data == "-" || data == "@-":
-		body, err := io.ReadAll(stdin)
-		if err != nil {
-			return "", fmt.Errorf("failed to read request body from stdin: %w", err)
-		}
-		return string(body), nil
-	case strings.HasPrefix(data, "@"):
-		path := strings.TrimPrefix(data, "@")
-		if path == "" {
-			return "", fmt.Errorf("missing file path after \"@\" in --data")
-		}
-		body, err := os.ReadFile(path)
-		if err != nil {
-			return "", fmt.Errorf("failed to read request body from %s: %w", path, err)
-		}
-		return string(body), nil
-	default:
-		return data, nil
+// readRequestBody reads the `api call` request body from r, such as stdin.
+func readRequestBody(r io.Reader) (string, error) {
+	body, err := io.ReadAll(r)
+	if err != nil {
+		return "", fmt.Errorf("failed to read request body from stdin: %w", err)
 	}
+	return string(body), nil
+}
+
+// readRequestBodyFile reads the `api call` request body from the file at path.
+func readRequestBodyFile(path string) (string, error) {
+	if path == "" {
+		return "", fmt.Errorf("missing file path after \"@\" in --data")
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("failed to read request body from %s: %w", path, err)
+	}
+	return string(body), nil
 }
 
 func registerGenericAPICall() *cobra.Command {
@@ -2237,11 +2231,18 @@ jq -n '{properties: {}}' | port api call /actions/my-action/runs --data -
 # get action runs for org
 port api call /actions/runs --org my-org`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			body, err := resolveRequestBody(data, cmd.InOrStdin())
+			// A JSON body never starts with "@" and is never just "-", so literal
+			// bodies are unaffected.
+			var err error
+			switch {
+			case data == "-" || data == "@-":
+				data, err = readRequestBody(cmd.InOrStdin())
+			case strings.HasPrefix(data, "@"):
+				data, err = readRequestBodyFile(strings.TrimPrefix(data, "@"))
+			}
 			if err != nil {
 				return err
 			}
-			data = body
 
 			flags := GetGlobalFlags(cmd.Context())
 			configManager := config.NewConfigManager(flags.ConfigFile)

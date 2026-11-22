@@ -14,45 +14,23 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func TestResolveRequestBody_LiteralIsUnchanged(t *testing.T) {
-	got, err := resolveRequestBody(`{"a":1}`, strings.NewReader("ignored"))
+func TestReadRequestBody_ReadsReader(t *testing.T) {
+	got, err := readRequestBody(strings.NewReader(`{"from":"stdin"}`))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got != `{"a":1}` {
-		t.Errorf("expected literal body, got %q", got)
+	if got != `{"from":"stdin"}` {
+		t.Errorf("expected reader body, got %q", got)
 	}
 }
 
-func TestResolveRequestBody_EmptyIsUnchanged(t *testing.T) {
-	got, err := resolveRequestBody("", strings.NewReader("ignored"))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if got != "" {
-		t.Errorf("expected empty body, got %q", got)
-	}
-}
-
-func TestResolveRequestBody_ReadsStdin(t *testing.T) {
-	for _, flag := range []string{"-", "@-"} {
-		got, err := resolveRequestBody(flag, strings.NewReader(`{"from":"stdin"}`))
-		if err != nil {
-			t.Fatalf("%s: unexpected error: %v", flag, err)
-		}
-		if got != `{"from":"stdin"}` {
-			t.Errorf("%s: expected stdin body, got %q", flag, got)
-		}
-	}
-}
-
-func TestResolveRequestBody_ReadsFile(t *testing.T) {
+func TestReadRequestBodyFile_ReadsFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "body.json")
 	if err := os.WriteFile(path, []byte(`{"from":"file"}`), 0o600); err != nil {
 		t.Fatalf("write body file: %v", err)
 	}
 
-	got, err := resolveRequestBody("@"+path, strings.NewReader("ignored"))
+	got, err := readRequestBodyFile(path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -61,10 +39,10 @@ func TestResolveRequestBody_ReadsFile(t *testing.T) {
 	}
 }
 
-func TestResolveRequestBody_MissingFileFails(t *testing.T) {
+func TestReadRequestBodyFile_MissingFileFails(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "missing.json")
 
-	_, err := resolveRequestBody("@"+path, strings.NewReader(""))
+	_, err := readRequestBodyFile(path)
 	if err == nil {
 		t.Fatal("expected an error for a missing file")
 	}
@@ -73,9 +51,9 @@ func TestResolveRequestBody_MissingFileFails(t *testing.T) {
 	}
 }
 
-func TestResolveRequestBody_EmptyPathFails(t *testing.T) {
-	if _, err := resolveRequestBody("@", strings.NewReader("")); err == nil {
-		t.Fatal(`expected an error for "@" without a path`)
+func TestReadRequestBodyFile_EmptyPathFails(t *testing.T) {
+	if _, err := readRequestBodyFile(""); err == nil {
+		t.Fatal("expected an error for an empty path")
 	}
 }
 
@@ -187,5 +165,38 @@ func TestAPICall_MissingBodyFileFailsBeforeRequest(t *testing.T) {
 	}
 	if gotMethod != "" {
 		t.Errorf("expected no request to %s, got %s", endpoint, gotMethod)
+	}
+}
+
+func TestAPICall_SendsLiteralBodyAndAtDashReadsStdin(t *testing.T) {
+	const endpoint = "/actions/my-action/runs"
+	cases := []struct {
+		name  string
+		data  string
+		stdin string
+		want  string
+	}{
+		{name: "literal", data: `{"properties":{"name":"literal"}}`, stdin: `{"properties":{"name":"ignored"}}`, want: "literal"},
+		{name: "@-", data: "@-", stdin: `{"properties":{"name":"stdin"}}`, want: "stdin"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotMethod string
+			var gotBody map[string]any
+			server := newAPICallTestServer(t, endpoint, &gotMethod, &gotBody)
+			defer server.Close()
+
+			if err := runAPICall(t, server, strings.NewReader(tc.stdin), endpoint, "--data", tc.data); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			properties, ok := gotBody["properties"].(map[string]any)
+			if !ok {
+				t.Fatalf("expected properties object in body, got %v", gotBody)
+			}
+			if properties["name"] != tc.want {
+				t.Errorf("expected name %q, got %v", tc.want, properties["name"])
+			}
+		})
 	}
 }
