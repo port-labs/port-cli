@@ -8,6 +8,18 @@ All notable changes to this project will be documented in this file.
 
 - `port api call --data` can read the request body from a file (`--data @body.json`) or from stdin (`--data -`), so large bodies no longer have to be passed as a command-line argument.
 
+## 0.5.0
+
+### Fixed
+
+- Serialize OAuth refreshes across CLI processes sharing the same credentials file, preventing concurrent refresh-token rotation from invalidating sessions.
+- Treat Auth0 `invalid_grant` as a terminal OAuth session failure: clear the stored credentials, require `port auth login`, and do not silently fall back to client credentials.
+
+### Changed
+
+- Move the full usage and installation guide from the README to the Port CLI documentation site.
+- Add `CODEOWNERS` and update the documentation logo assets.
+
 ## 0.4.0
 
 The `port-cli` repo has been moved under the `port-labs` GitHub organization.
